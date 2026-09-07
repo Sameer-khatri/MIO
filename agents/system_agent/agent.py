@@ -16,7 +16,15 @@ if sys_agent_dir not in sys.path:
 
 from tools.applications import open_application
 from tools.processes import get_running_applications, is_application_running
-from tools.filesystem import list_files, find_file_or_folder, create_folder, locate_executable
+from tools.filesystem import (
+    list_files,
+    find_file_or_folder,
+    create_folder,
+    copy_file_or_folder,
+    move_file_or_folder,
+    rename_file_or_folder,
+    locate_executable,
+)
 
 
 def extract_where_target(user_input: str) -> str | None:
@@ -175,7 +183,40 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
             return True, f"✅ {result.get('message')}"
         return True, result.get("message", f"Failed to create folder '{folder_name}'.")
 
-    # 7. "find <file or folder>"
+    # 7. "copy <file or folder> to <location>"
+    if lower_input.startswith("copy "):
+        remainder = cleaned[5:].strip()
+        match = re.search(r"^(.*?)\s+to\s+(.*)$", remainder, re.IGNORECASE)
+        if not match:
+            return True, "Please use the format: 'copy <file or folder> to <location>'"
+        source_query = match.group(1).strip()
+        location_name = match.group(2).strip()
+        result = copy_file_or_folder(source_query, location_name)
+        return True, result.get("message", f"Failed to copy '{source_query}'.")
+
+    # 8. "move <file or folder> to <location>"
+    if lower_input.startswith("move "):
+        remainder = cleaned[5:].strip()
+        match = re.search(r"^(.*?)\s+to\s+(.*)$", remainder, re.IGNORECASE)
+        if not match:
+            return True, "Please use the format: 'move <file or folder> to <location>'"
+        source_query = match.group(1).strip()
+        location_name = match.group(2).strip()
+        result = move_file_or_folder(source_query, location_name)
+        return True, result.get("message", f"Failed to move '{source_query}'.")
+
+    # 9. "rename <file or folder> to <new name>"
+    if lower_input.startswith("rename "):
+        remainder = cleaned[7:].strip()
+        match = re.search(r"^(.*?)\s+to\s+(.*)$", remainder, re.IGNORECASE)
+        if not match:
+            return True, "Please use the format: 'rename <file or folder> to <new name>'"
+        source_query = match.group(1).strip()
+        new_name = match.group(2).strip()
+        result = rename_file_or_folder(source_query, new_name)
+        return True, result.get("message", f"Failed to rename '{source_query}'.")
+
+    # 10. "find <file or folder>"
     if lower_input.startswith("find "):
         query = cleaned[5:].strip()
         if not query:
@@ -189,7 +230,7 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
             return True, f"No matches found for '{query}'."
         return True, result.get("message", f"Failed to search for '{query}'.")
 
-    # 8. Open command handling
+    # 11. Open command handling
     if lower_input.startswith("open "):
         raw_target = cleaned[5:].strip()
         if not raw_target:
@@ -204,7 +245,7 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     if lower_input == "open":
         return True, "Please specify an application to open. Example: 'open calculator'"
 
-    return True, f"Unknown command: '{cleaned}'. Type 'open <app>', 'where is <tool>?', 'is <app> running?', 'show files in <folder>', 'find <name>', 'create folder <name> in <location>', or 'exit'."
+    return True, f"Unknown command: '{cleaned}'. Type 'open <app>', 'where is <tool>?', 'is <app> running?', 'show files in <folder>', 'find <name>', 'copy <file or folder> to <location>', 'move <file or folder> to <location>', 'rename <file or folder> to <new name>', 'create folder <name> in <location>', or 'exit'."
 
 
 def run_agent():

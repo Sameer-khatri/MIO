@@ -14,7 +14,6 @@ FRIENDLY_LOCATIONS = {
     "home": lambda: os.path.expanduser("~"),
 }
 
-
 def resolve_location(location_name: str) -> str | None:
     """Resolves friendly folder names or paths to an absolute filesystem path."""
     if not location_name or not isinstance(location_name, str):
@@ -35,6 +34,99 @@ def resolve_location(location_name: str) -> str | None:
         return home_candidate
 
     return os.path.abspath(cleaned)
+
+
+def resolve_destination(query: str) -> dict:
+    """Resolve a real destination folder without trusting unresolved paths or memory."""
+    from tools.applications import (
+        find_in_memory,
+        forget_memory,
+        load_memory,
+        mark_memory_verified,
+        remember_path,
+        validate_memory_record,
+    )
+
+    if not query or not isinstance(query, str):
+        return {"success": False, "path": "", "matches": [], "message": "Invalid destination specified."}
+
+    cleaned = query.strip()
+    if not cleaned:
+        return {"success": False, "path": "", "matches": [], "message": "Invalid destination specified."}
+
+    normalized = cleaned.lower()
+    if normalized in FRIENDLY_LOCATIONS:
+        friendly_path = resolve_location(normalized)
+        if os.path.isdir(friendly_path):
+            return {"success": True, "path": friendly_path, "matches": [friendly_path], "message": f"Using {cleaned}."}
+        return {"success": False, "path": friendly_path, "matches": [], "message": f"Location '{cleaned}' not found."}
+
+    expanded = os.path.abspath(os.path.expanduser(os.path.expandvars(cleaned)))
+    direct_candidates = [expanded]
+    if not os.path.isabs(cleaned):
+        direct_candidates.extend([
+            os.path.join(os.getcwd(), cleaned),
+            os.path.join(os.path.expanduser("~"), cleaned),
+        ])
+        path_parts = cleaned.replace("/", os.path.sep).split(os.path.sep)
+        if path_parts and path_parts[0].lower() in FRIENDLY_LOCATIONS:
+            friendly_base = resolve_location(path_parts[0].lower())
+            nested_part = os.path.join(*path_parts[1:]) if len(path_parts) > 1 else ""
+            if friendly_base:
+                direct_candidates.append(os.path.join(friendly_base, nested_part))
+        for location_name in FRIENDLY_LOCATIONS:
+            base = resolve_location(location_name)
+            if base:
+                direct_candidates.append(os.path.join(base, cleaned))
+
+    direct_matches = []
+    for candidate in direct_candidates:
+        if os.path.isdir(candidate) and os.path.normcase(os.path.abspath(candidate)) not in {
+            os.path.normcase(path) for path in direct_matches
+        }:
+            direct_matches.append(os.path.abspath(candidate))
+    if len(direct_matches) == 1:
+        remember_path(os.path.basename(direct_matches[0]), direct_matches[0])
+        return {"success": True, "path": direct_matches[0], "matches": direct_matches, "message": f"Using '{cleaned}'."}
+    if len(direct_matches) > 1:
+        return _ambiguous_destination_result(cleaned, direct_matches)
+
+    memory = load_memory()
+    memory_key, memory_record = find_in_memory(normalized, memory)
+    if memory_record and memory_record.get("record_type") == "path":
+        remembered_path = memory_record.get("target", "")
+        if validate_memory_record(memory_record) and os.path.isdir(remembered_path):
+            mark_memory_verified(memory_key)
+            return {"success": True, "path": remembered_path, "matches": [remembered_path], "message": f"Using remembered folder '{cleaned}'."}
+        forget_memory(memory_key)
+
+    search_result = find_file_or_folder(cleaned)
+    folder_matches = [path for path in search_result.get("matches", []) if os.path.isdir(path)]
+    unique_matches = []
+    seen = set()
+    for path in folder_matches:
+        key = os.path.normcase(os.path.abspath(path))
+        if key not in seen:
+            seen.add(key)
+            unique_matches.append(path)
+
+    if len(unique_matches) == 1:
+        remember_path(cleaned, unique_matches[0])
+        return {"success": True, "path": unique_matches[0], "matches": unique_matches, "message": f"Using '{cleaned}'."}
+    if len(unique_matches) > 1:
+        return _ambiguous_destination_result(cleaned, unique_matches)
+
+    return {"success": False, "path": "", "matches": [], "message": f"Destination folder '{cleaned}' not found."}
+
+
+def _ambiguous_destination_result(query: str, matches: list[str]) -> dict:
+    match_lines = "\n".join(f"- {match}" for match in matches)
+    return {
+        "success": False,
+        "path": "",
+        "matches": matches,
+        "message": f"I found multiple destination folders for '{query}':\n{match_lines}\nPlease be more specific.",
+    }
 
 
 def list_files(location: str) -> dict:
@@ -124,6 +216,15 @@ def find_file_or_folder(query: str, max_depth: int = 3) -> dict:
             "message": "Invalid search query."
         }
 
+    direct_query = os.path.abspath(os.path.expanduser(os.path.expandvars(cleaned)))
+    if os.path.exists(direct_query):
+        return {
+            "success": True,
+            "query": cleaned,
+            "matches": [direct_query],
+            "message": "Found 1 match.",
+        }
+
     cached_matches = []
     stale_aliases = []
     memory = load_memory()
@@ -177,10 +278,19 @@ def find_file_or_folder(query: str, max_depth: int = 3) -> dict:
 
     def match_priority(p):
         base = os.path.basename(p).lower()
-        is_exact = base == norm_query
-        return (not is_exact, len(p))
+        raw_base = os.path.basename(p)
+        if raw_base == cleaned:
+            name_rank = 0
+        elif base == norm_query:
+            name_rank = 1
+        elif base.startswith(norm_query):
+            name_rank = 2
+        else:
+            name_rank = 3
+        depth = p.rstrip(os.path.sep).count(os.path.sep)
+        return (name_rank, depth, len(p))
 
-    sorted_matches = cached_matches + sorted(matches, key=match_priority)
+    sorted_matches = sorted(cached_matches + matches, key=match_priority)
 
     for match in sorted_matches:
         if os.path.basename(match).lower() == norm_query:
@@ -196,7 +306,7 @@ def find_file_or_folder(query: str, max_depth: int = 3) -> dict:
 
 
 def create_folder(folder_name: str, location: str) -> dict:
-    """Creates a new folder in the specified friendly location or directory path."""
+    """Creates a new folder inside a resolved destination folder."""
     if not folder_name or not isinstance(folder_name, str):
         return {
             "success": False,
@@ -212,11 +322,12 @@ def create_folder(folder_name: str, location: str) -> dict:
             "path": ""
         }
 
-    resolved_loc = resolve_location(location)
-    if not resolved_loc or not os.path.exists(resolved_loc):
+    destination = resolve_destination(location)
+    resolved_loc = destination.get("path", "") if destination.get("success") else ""
+    if not resolved_loc:
         return {
             "success": False,
-            "message": f"Location '{location}' not found.",
+            "message": destination.get("message", f"Location '{location}' not found."),
             "path": ""
         }
 
@@ -243,6 +354,301 @@ def create_folder(folder_name: str, location: str) -> dict:
             "message": str(error),
             "path": target_path
         }
+
+
+def copy_file_or_folder(source_query: str, location: str) -> dict:
+    """Copies one discovered file or folder into a resolved destination without overwriting."""
+    from tools.applications import remember_path
+
+    if not source_query or not isinstance(source_query, str):
+        return {
+            "success": False,
+            "source": "",
+            "destination": "",
+            "message": "Invalid source specified.",
+        }
+
+    if not location or not isinstance(location, str):
+        return {
+            "success": False,
+            "source": source_query,
+            "destination": "",
+            "message": "Invalid destination specified.",
+        }
+
+    clean_source = source_query.strip()
+    clean_location = location.strip()
+    destination = resolve_destination(clean_location)
+    destination_root = destination.get("path", "") if destination.get("success") else ""
+    if not destination_root:
+        return {
+            "success": False,
+            "source": clean_source,
+            "destination": "",
+            "message": destination.get("message", f"Location '{clean_location}' not found."),
+        }
+
+    found = find_file_or_folder(clean_source)
+    found_matches = found.get("matches", []) if found.get("success") else []
+    matches = []
+    for match in found_matches:
+        destination_candidate = os.path.join(destination_root, os.path.basename(match))
+        if os.path.abspath(match).lower() == os.path.abspath(destination_candidate).lower():
+            continue
+        matches.append(match)
+
+    if not matches and found_matches:
+        existing_name = os.path.basename(found_matches[0])
+        destination_path = os.path.join(destination_root, existing_name)
+        if os.path.exists(destination_path):
+            return {
+                "success": False,
+                "source": found_matches[0],
+                "destination": destination_path,
+                "message": f"A file or folder named '{existing_name}' already exists in {clean_location}.",
+            }
+
+    if not matches:
+        return {
+            "success": False,
+            "source": clean_source,
+            "destination": "",
+            "message": f"I couldn't find '{clean_source}'.",
+        }
+
+    if len(matches) > 1:
+        match_lines = "\n".join(f"- {match}" for match in matches)
+        return {
+            "success": False,
+            "source": clean_source,
+            "destination": "",
+            "matches": matches,
+            "message": f"I found multiple matches for '{clean_source}':\n{match_lines}\nPlease be more specific.",
+        }
+
+    source_path = matches[0]
+    if not os.path.exists(source_path):
+        return {
+            "success": False,
+            "source": source_path,
+            "destination": "",
+            "message": f"I couldn't find '{clean_source}'.",
+        }
+
+    destination_path = os.path.join(destination_root, os.path.basename(source_path))
+    source_key = os.path.normcase(os.path.abspath(source_path))
+    destination_root_key = os.path.normcase(os.path.abspath(destination_root))
+    destination_key = os.path.normcase(os.path.abspath(destination_path))
+    if source_key == destination_key or source_key == destination_root_key:
+        return {
+            "success": False,
+            "source": source_path,
+            "destination": destination_path,
+            "message": "The source and destination are the same location.",
+        }
+    if os.path.isdir(source_path):
+        try:
+            if os.path.commonpath([source_key, destination_root_key]) == source_key:
+                return {
+                    "success": False,
+                    "source": source_path,
+                    "destination": destination_path,
+                    "message": "A folder cannot be copied into itself or one of its child folders.",
+                }
+        except ValueError:
+            pass
+    if os.path.exists(destination_path):
+        return {
+            "success": False,
+            "source": source_path,
+            "destination": destination_path,
+            "message": f"A file or folder named '{os.path.basename(source_path)}' already exists in {clean_location}.",
+        }
+
+    try:
+        if os.path.isdir(source_path):
+            shutil.copytree(source_path, destination_path)
+        else:
+            shutil.copy2(source_path, destination_path)
+    except Exception as error:
+        return {
+            "success": False,
+            "source": source_path,
+            "destination": destination_path,
+            "message": str(error),
+        }
+
+    if not os.path.exists(destination_path):
+        return {
+            "success": False,
+            "source": source_path,
+            "destination": destination_path,
+            "message": f"Copy verification failed for '{clean_source}'.",
+        }
+
+    remember_path(os.path.basename(destination_path), destination_path)
+    return {
+        "success": True,
+        "source": source_path,
+        "destination": destination_path,
+        "message": f"Copied '{os.path.basename(source_path)}' to {clean_location}.",
+    }
+
+
+def _resolve_single_source(source_query: str, excluded_destination_root: str | None = None) -> tuple[str | None, dict | None]:
+    """Resolve exactly one existing source, preserving ambiguity details."""
+    found = find_file_or_folder(source_query)
+    raw_matches = [path for path in found.get("matches", []) if os.path.exists(path)] if found.get("success") else []
+    matches = raw_matches
+    if excluded_destination_root:
+        matches = [
+            path for path in raw_matches
+            if os.path.normcase(os.path.abspath(path)) != os.path.normcase(
+                os.path.abspath(os.path.join(excluded_destination_root, os.path.basename(path)))
+            )
+        ]
+    if not matches:
+        if raw_matches and excluded_destination_root:
+            return None, {
+                "success": False,
+                "source": raw_matches[0],
+                "message": "The source and destination are the same location.",
+            }
+        return None, {
+            "success": False,
+            "source": source_query,
+            "message": f"I couldn't find '{source_query}'.",
+        }
+    if len(matches) > 1:
+        match_lines = "\n".join(f"- {match}" for match in matches)
+        return None, {
+            "success": False,
+            "source": source_query,
+            "matches": matches,
+            "message": f"I found multiple matches for '{source_query}':\n{match_lines}\nPlease be more specific.",
+        }
+    return matches[0], None
+
+
+def _update_path_memory(old_path: str, new_path: str, display_name: str | None = None) -> None:
+    """Update one remembered path in place, retaining its aliases."""
+    from tools.applications import load_memory, remember_path
+
+    memory = load_memory()
+    old_key = os.path.normcase(os.path.abspath(old_path))
+    for key, record in memory.items():
+        target = record.get("target", "")
+        if os.path.normcase(os.path.abspath(target)) == old_key:
+            aliases = list(record.get("aliases", []))
+            remember_path(
+                key,
+                new_path,
+                name=display_name or record.get("name") or os.path.basename(new_path),
+                aliases=aliases,
+            )
+            return
+    remember_path(os.path.basename(new_path), new_path, name=display_name)
+
+
+def move_file_or_folder(source_query: str, location: str) -> dict:
+    """Move exactly one source into a resolved destination without overwriting."""
+    if not source_query or not isinstance(source_query, str):
+        return {"success": False, "source": "", "destination": "", "message": "Invalid source specified."}
+    if not location or not isinstance(location, str):
+        return {"success": False, "source": source_query, "destination": "", "message": "Invalid destination specified."}
+
+    clean_source = source_query.strip()
+    destination = resolve_destination(location.strip())
+    destination_root = destination.get("path", "") if destination.get("success") else ""
+    if not destination_root:
+        return {
+            "success": False,
+            "source": clean_source,
+            "destination": "",
+            "message": destination.get("message", f"Location '{location}' not found."),
+        }
+
+    source_path, error = _resolve_single_source(clean_source, destination_root)
+    if error:
+        error["destination"] = ""
+        return error
+
+    destination_path = os.path.join(destination_root, os.path.basename(source_path))
+    source_key = os.path.normcase(os.path.abspath(source_path))
+    destination_root_key = os.path.normcase(os.path.abspath(destination_root))
+    destination_key = os.path.normcase(os.path.abspath(destination_path))
+    if source_key == destination_key or source_key == destination_root_key:
+        return {"success": False, "source": source_path, "destination": destination_path, "message": "The source and destination are the same location."}
+    if os.path.isdir(source_path):
+        try:
+            if os.path.commonpath([source_key, destination_root_key]) == source_key:
+                return {"success": False, "source": source_path, "destination": destination_path, "message": "A folder cannot be moved into itself or one of its child folders."}
+        except ValueError:
+            pass
+    if os.path.exists(destination_path):
+        return {
+            "success": False,
+            "source": source_path,
+            "destination": destination_path,
+            "message": f"A file or folder named '{os.path.basename(source_path)}' already exists in {location.strip()}.",
+        }
+
+    try:
+        shutil.move(source_path, destination_path)
+    except Exception as error:
+        return {"success": False, "source": source_path, "destination": destination_path, "message": str(error)}
+
+    if os.path.exists(source_path) or not os.path.exists(destination_path):
+        return {
+            "success": False,
+            "source": source_path,
+            "destination": destination_path,
+            "message": "Move verification failed.",
+        }
+
+    _update_path_memory(source_path, destination_path)
+    return {"success": True, "source": source_path, "destination": destination_path, "message": "Moved successfully."}
+
+
+def _valid_rename_name(name: str) -> bool:
+    """Check a simple Windows filename without accepting path syntax."""
+    invalid_chars = '<>:"/\\|?*'
+    return bool(name) and name not in (".", "..") and not any(char in name for char in invalid_chars) and not any(ord(char) < 32 for char in name) and name == name.rstrip(" .")
+
+
+def rename_file_or_folder(source_query: str, new_name: str) -> dict:
+    """Rename exactly one source using a validated simple filename."""
+    if not source_query or not isinstance(source_query, str):
+        return {"success": False, "old_path": "", "new_path": "", "message": "Invalid source specified."}
+    clean_source = source_query.strip()
+    clean_name = new_name.strip() if isinstance(new_name, str) else ""
+    if not _valid_rename_name(clean_name):
+        return {"success": False, "old_path": "", "new_path": "", "message": "Invalid rename target. Use a simple Windows filename."}
+
+    source_path, error = _resolve_single_source(clean_source)
+    if error:
+        error["old_path"] = ""
+        error["new_path"] = ""
+        return error
+
+    if os.path.isfile(source_path) and not os.path.splitext(clean_name)[1]:
+        clean_name += os.path.splitext(source_path)[1]
+    new_path = os.path.join(os.path.dirname(source_path), clean_name)
+    if os.path.normcase(os.path.abspath(source_path)) == os.path.normcase(os.path.abspath(new_path)):
+        return {"success": False, "old_path": source_path, "new_path": new_path, "message": "The source and destination are the same location."}
+    if os.path.exists(new_path):
+        return {"success": False, "old_path": source_path, "new_path": new_path, "message": f"A file or folder named '{os.path.basename(new_path)}' already exists."}
+
+    try:
+        os.rename(source_path, new_path)
+    except Exception as error:
+        return {"success": False, "old_path": source_path, "new_path": new_path, "message": str(error)}
+
+    if os.path.exists(source_path) or not os.path.exists(new_path):
+        return {"success": False, "old_path": source_path, "new_path": new_path, "message": "Rename verification failed."}
+
+    _update_path_memory(source_path, new_path, display_name=os.path.basename(new_path))
+    return {"success": True, "old_path": source_path, "new_path": new_path, "message": "Renamed successfully."}
 
 
 def _path_lookup(query: str) -> list[str]:

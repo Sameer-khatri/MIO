@@ -37,9 +37,13 @@ from tools.processes import (
 )
 from tools.filesystem import (
     resolve_location,
+    resolve_destination,
     list_files,
     find_file_or_folder,
     create_folder,
+    copy_file_or_folder,
+    move_file_or_folder,
+    rename_file_or_folder,
     locate_executable,
     locate_executable_in_path,
     FRIENDLY_LOCATIONS,
@@ -196,6 +200,69 @@ class TestSystemAgent(unittest.TestCase):
         self.assertIsNone(resolve_location(""))
         self.assertIsNone(resolve_location(None))
 
+    def test_resolve_destination_absolute_and_nested(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nested = os.path.join(tmpdir, "Documents", "Reports")
+            os.makedirs(nested)
+
+            absolute = resolve_destination(nested)
+            self.assertTrue(absolute["success"])
+            self.assertEqual(absolute["path"], nested)
+
+            with patch("tools.filesystem.resolve_location", side_effect=lambda name: os.path.join(tmpdir, name.title())):
+                relative = resolve_destination("Documents\\Reports")
+            self.assertTrue(relative["success"])
+            self.assertEqual(relative["path"], nested)
+
+    def test_resolve_destination_remembered_and_stale(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            remembered = os.path.join(tmpdir, "remembered")
+            os.mkdir(remembered)
+            fake_storage = {
+                "remembered": {
+                    "name": "remembered",
+                    "aliases": [],
+                    "record_type": "path",
+                    "launch_method": "folder",
+                    "target": remembered,
+                }
+            }
+            self.use_fake_memory(fake_storage)
+            result = resolve_destination("remembered")
+            self.assertTrue(result["success"])
+            self.assertEqual(result["path"], remembered)
+
+            shutil.rmtree(remembered)
+            replacement = os.path.join(tmpdir, "Desktop", "remembered")
+            os.makedirs(replacement)
+            with patch("tools.filesystem.resolve_location", side_effect=lambda name: os.path.dirname(replacement) if name == "desktop" else tmpdir):
+                result = resolve_destination("remembered")
+            self.assertTrue(result["success"])
+            self.assertEqual(result["path"], replacement)
+            self.assertEqual(fake_storage["remembered"]["target"], replacement)
+
+    def test_resolve_destination_unique_ambiguous_and_missing_search(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            desktop = os.path.join(tmpdir, "Desktop")
+            documents = os.path.join(tmpdir, "Documents")
+            os.makedirs(os.path.join(desktop, "unique"))
+            os.makedirs(documents)
+            with patch("tools.filesystem.resolve_location", side_effect=lambda name: desktop if name == "desktop" else documents):
+                unique = resolve_destination("unique")
+            self.assertTrue(unique["success"])
+            self.assertEqual(unique["path"], os.path.join(desktop, "unique"))
+
+            os.makedirs(os.path.join(documents, "ambiguous"))
+            os.makedirs(os.path.join(desktop, "ambiguous"))
+            with patch("tools.filesystem.resolve_location", side_effect=lambda name: desktop if name == "desktop" else documents):
+                ambiguous = resolve_destination("ambiguous")
+                missing = resolve_destination("no_such_destination")
+            self.assertFalse(ambiguous["success"])
+            self.assertEqual(len(ambiguous["matches"]), 2)
+            self.assertIn("Please be more specific.", ambiguous["message"])
+            self.assertFalse(missing["success"])
+            self.assertIn("not found", missing["message"])
+
     def test_list_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             f1 = os.path.join(tmpdir, "report.pdf")
@@ -243,6 +310,315 @@ class TestSystemAgent(unittest.TestCase):
                 res_folder = find_file_or_folder("mio_subfolder folder")
                 self.assertTrue(res_folder["success"])
                 self.assertTrue(any("mio_subfolder" in m.lower() for m in res_folder["matches"]))
+
+    def test_copy_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_root = os.path.join(tmpdir, "source")
+            desktop = os.path.join(tmpdir, "Desktop")
+            os.mkdir(source_root)
+            os.mkdir(desktop)
+            source_file = os.path.join(source_root, "report.pdf")
+            with open(source_file, "w", encoding="utf-8") as f:
+                f.write("copy me")
+
+            with patch("tools.filesystem.resolve_location", side_effect=lambda loc: desktop if loc == "desktop" else source_root):
+                res = copy_file_or_folder("report.pdf", "desktop")
+
+            destination = os.path.join(desktop, "report.pdf")
+            self.assertTrue(res["success"])
+            self.assertEqual(res["source"], source_file)
+            self.assertEqual(res["destination"], destination)
+            self.assertTrue(os.path.exists(source_file))
+            self.assertTrue(os.path.exists(destination))
+
+    def test_copy_folder(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_root = os.path.join(tmpdir, "source")
+            documents = os.path.join(tmpdir, "Documents")
+            os.mkdir(source_root)
+            os.mkdir(documents)
+            source_folder = os.path.join(source_root, "AIRA")
+            os.mkdir(source_folder)
+            nested_file = os.path.join(source_folder, "notes.txt")
+            with open(nested_file, "w", encoding="utf-8") as f:
+                f.write("folder copy")
+
+            with patch("tools.filesystem.resolve_location", side_effect=lambda loc: documents if loc == "documents" else source_root):
+                res = copy_file_or_folder("AIRA", "documents")
+
+            destination = os.path.join(documents, "AIRA")
+            self.assertTrue(res["success"])
+            self.assertTrue(os.path.isdir(source_folder))
+            self.assertTrue(os.path.isdir(destination))
+            self.assertTrue(os.path.exists(os.path.join(destination, "notes.txt")))
+
+    def test_copy_source_not_found(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("tools.filesystem.resolve_location", return_value=tmpdir):
+                res = copy_file_or_folder("missing.txt", "desktop")
+
+            self.assertFalse(res["success"])
+            self.assertEqual(res["message"], "I couldn't find 'missing.txt'.")
+
+    def test_copy_multiple_source_matches(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_root = os.path.join(tmpdir, "source")
+            desktop = os.path.join(tmpdir, "Desktop")
+            os.mkdir(source_root)
+            os.mkdir(desktop)
+            one = os.path.join(source_root, "AIRA")
+            two = os.path.join(source_root, "AIRA backup")
+            os.mkdir(one)
+            os.mkdir(two)
+
+            with patch("tools.filesystem.resolve_location", side_effect=lambda loc: desktop if loc == "desktop" else source_root):
+                res = copy_file_or_folder("AIRA", "desktop")
+
+            self.assertFalse(res["success"])
+            self.assertEqual(res["matches"], [one, two])
+            self.assertIn("Please be more specific.", res["message"])
+
+    def test_copy_destination_already_exists(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_root = os.path.join(tmpdir, "source")
+            desktop = os.path.join(tmpdir, "Desktop")
+            os.mkdir(source_root)
+            os.mkdir(desktop)
+            source_file = os.path.join(source_root, "report.pdf")
+            destination = os.path.join(desktop, "report.pdf")
+            with open(source_file, "w", encoding="utf-8") as f:
+                f.write("source")
+            with open(destination, "w", encoding="utf-8") as f:
+                f.write("existing")
+
+            with patch("tools.filesystem.resolve_location", side_effect=lambda loc: desktop if loc == "desktop" else source_root):
+                res = copy_file_or_folder("report.pdf", "desktop")
+
+            self.assertFalse(res["success"])
+            self.assertEqual(res["message"], "A file or folder named 'report.pdf' already exists in desktop.")
+            with open(destination, "r", encoding="utf-8") as f:
+                self.assertEqual(f.read(), "existing")
+
+    def test_copy_destination_resolution(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("tools.filesystem.resolve_location", return_value=tmpdir) as mock_resolve, \
+                 patch("tools.filesystem.find_file_or_folder", return_value={"success": True, "matches": []}):
+                copy_file_or_folder("report.pdf", "pictures")
+
+            mock_resolve.assert_called_with("pictures")
+
+    def test_copy_verification_after_copy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_root = os.path.join(tmpdir, "source")
+            desktop = os.path.join(tmpdir, "Desktop")
+            os.mkdir(source_root)
+            os.mkdir(desktop)
+            source_file = os.path.join(source_root, "report.pdf")
+            with open(source_file, "w", encoding="utf-8") as f:
+                f.write("copy me")
+
+            real_exists = os.path.exists
+
+            def exists_after_copy(path):
+                if path == os.path.join(desktop, "report.pdf"):
+                    return False
+                return real_exists(path)
+
+            with patch("tools.filesystem.resolve_location", side_effect=lambda loc: desktop if loc == "desktop" else source_root), \
+                 patch("tools.filesystem.os.path.exists", side_effect=exists_after_copy):
+                res = copy_file_or_folder("report.pdf", "desktop")
+
+            self.assertFalse(res["success"])
+            self.assertIn("Copy verification failed", res["message"])
+
+    def test_copy_to_named_full_path_and_self_or_child_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_root = os.path.join(tmpdir, "source")
+            destination_root = os.path.join(tmpdir, "destination")
+            os.makedirs(source_root)
+            os.makedirs(destination_root)
+            source_folder = os.path.join(source_root, "PRIMEX")
+            os.mkdir(source_folder)
+
+            self.assertTrue(copy_file_or_folder("PRIMEX", destination_root)["success"])
+            child = os.path.join(source_folder, "child")
+            os.mkdir(child)
+            with patch("tools.filesystem.find_file_or_folder", return_value={"success": True, "matches": [source_folder]}):
+                result = copy_file_or_folder(source_folder, child)
+            self.assertFalse(result["success"])
+            self.assertIn("itself or one of its child", result["message"])
+
+    def test_move_file_to_friendly_destination_and_update_memory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_root = os.path.join(tmpdir, "source")
+            desktop = os.path.join(tmpdir, "Desktop")
+            os.makedirs(source_root)
+            os.mkdir(desktop)
+            source = os.path.join(source_root, "report.pdf")
+            with open(source, "w", encoding="utf-8") as file:
+                file.write("move me")
+            fake_storage = {
+                "report": {
+                    "name": "report.pdf",
+                    "aliases": ["weekly report"],
+                    "record_type": "path",
+                    "launch_method": "file",
+                    "target": source,
+                }
+            }
+            self.use_fake_memory(fake_storage)
+
+            with patch("tools.filesystem.resolve_location", side_effect=lambda name: desktop if name == "desktop" else source_root):
+                result = move_file_or_folder("report.pdf", "desktop")
+
+            destination = os.path.join(desktop, "report.pdf")
+            self.assertTrue(result["success"])
+            self.assertFalse(os.path.exists(source))
+            self.assertTrue(os.path.exists(destination))
+            self.assertEqual(fake_storage["report"]["target"], destination)
+            self.assertIn("weekly report", fake_storage["report"]["aliases"])
+
+    def test_move_folder_to_absolute_path_and_reject_collisions_and_child(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source = os.path.join(tmpdir, "AIRA")
+            destination_root = os.path.join(tmpdir, "archive")
+            os.mkdir(source)
+            os.mkdir(destination_root)
+            result = move_file_or_folder(source, destination_root)
+            self.assertTrue(result["success"])
+            moved = os.path.join(destination_root, "AIRA")
+            self.assertTrue(os.path.isdir(moved))
+
+            collision_source = os.path.join(tmpdir, "report.txt")
+            collision_dest = os.path.join(destination_root, "report.txt")
+            open(collision_source, "w").close()
+            open(collision_dest, "w").close()
+            with patch("tools.filesystem.find_file_or_folder", return_value={"success": True, "matches": [collision_source, collision_dest]}):
+                collision = move_file_or_folder("report.txt", destination_root)
+            self.assertFalse(collision["success"])
+            self.assertIn("already exists", collision["message"])
+            self.assertTrue(os.path.exists(collision_source))
+
+            child_source = os.path.join(tmpdir, "folder")
+            os.mkdir(child_source)
+            child = os.path.join(child_source, "child")
+            os.mkdir(child)
+            with patch("tools.filesystem.find_file_or_folder", return_value={"success": True, "matches": [child_source]}):
+                child_result = move_file_or_folder(child_source, child)
+            self.assertFalse(child_result["success"])
+            self.assertIn("itself or one of its child", child_result["message"])
+
+    def test_move_rejects_ambiguous_source_and_destination(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            one = os.path.join(tmpdir, "one.txt")
+            two = os.path.join(tmpdir, "two.txt")
+            open(one, "w").close()
+            open(two, "w").close()
+            destination = os.path.join(tmpdir, "archive")
+            os.mkdir(destination)
+            with patch("tools.filesystem.find_file_or_folder", return_value={"success": True, "matches": [one, two]}):
+                source_result = move_file_or_folder("report.txt", destination)
+            self.assertFalse(source_result["success"])
+            self.assertEqual(source_result["matches"], [one, two])
+
+            with patch("tools.filesystem.resolve_destination", return_value={"success": False, "path": "", "matches": [one, two], "message": "Please be more specific."}):
+                destination_result = move_file_or_folder(one, "archive")
+            self.assertFalse(destination_result["success"])
+            self.assertIn("more specific", destination_result["message"])
+
+    def test_move_verification_failure(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source = os.path.join(tmpdir, "report.txt")
+            open(source, "w").close()
+            destination = os.path.join(tmpdir, "destination")
+            os.mkdir(destination)
+            with patch("tools.filesystem.shutil.move"):
+                result = move_file_or_folder(source, destination)
+            self.assertFalse(result["success"])
+            self.assertIn("verification failed", result["message"])
+
+    def test_rename_file_preserves_or_changes_extension_and_updates_memory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source = os.path.join(tmpdir, "report.pdf")
+            open(source, "w").close()
+            fake_storage = {
+                "report": {
+                    "name": "report.pdf",
+                    "aliases": ["old report"],
+                    "record_type": "path",
+                    "launch_method": "file",
+                    "target": source,
+                }
+            }
+            self.use_fake_memory(fake_storage)
+            result = rename_file_or_folder(source, "final_report")
+            renamed = os.path.join(tmpdir, "final_report.pdf")
+            self.assertTrue(result["success"])
+            self.assertFalse(os.path.exists(source))
+            self.assertTrue(os.path.exists(renamed))
+            self.assertEqual(fake_storage["report"]["target"], renamed)
+            self.assertIn("old report", fake_storage["report"]["aliases"])
+
+            changed = rename_file_or_folder(renamed, "final_report.txt")
+            self.assertTrue(changed["success"])
+            self.assertTrue(os.path.exists(os.path.join(tmpdir, "final_report.txt")))
+
+    def test_rename_folder_collision_invalid_name_ambiguity_and_verification(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source = os.path.join(tmpdir, "reports")
+            os.mkdir(source)
+            self.assertTrue(rename_file_or_folder(source, "archive")["success"])
+            renamed = os.path.join(tmpdir, "archive")
+            collision = os.path.join(tmpdir, "existing")
+            os.mkdir(collision)
+            result = rename_file_or_folder(renamed, "existing")
+            self.assertFalse(result["success"])
+            self.assertTrue(os.path.isdir(renamed))
+
+            invalid = rename_file_or_folder(renamed, "bad/name")
+            self.assertFalse(invalid["success"])
+
+            one = os.path.join(tmpdir, "one")
+            two = os.path.join(tmpdir, "two")
+            os.mkdir(one)
+            os.mkdir(two)
+            with patch("tools.filesystem.find_file_or_folder", return_value={"success": True, "matches": [one, two]}):
+                ambiguous = rename_file_or_folder("reports", "archive2")
+            self.assertFalse(ambiguous["success"])
+            self.assertEqual(ambiguous["matches"], [one, two])
+
+            with patch("tools.filesystem.os.rename"):
+                verification = rename_file_or_folder(renamed, "verified")
+            self.assertFalse(verification["success"])
+            self.assertIn("verification failed", verification["message"])
+
+    def test_create_folder_uses_named_parent_and_rejects_ambiguous_parent(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            desktop = os.path.join(tmpdir, "Desktop")
+            documents = os.path.join(tmpdir, "Documents")
+            os.makedirs(os.path.join(desktop, "AIRA"))
+            os.makedirs(documents)
+            with patch("tools.filesystem.resolve_location", side_effect=lambda name: desktop if name == "desktop" else documents):
+                result = create_folder("reports", "AIRA")
+            self.assertTrue(result["success"])
+            self.assertTrue(os.path.isdir(os.path.join(desktop, "AIRA", "reports")))
+
+            os.makedirs(os.path.join(documents, "AIRA"))
+            with patch("tools.filesystem.resolve_location", side_effect=lambda name: desktop if name == "desktop" else documents):
+                ambiguous = create_folder("backup", "AIRA")
+            self.assertFalse(ambiguous["success"])
+            self.assertIn("multiple destination folders", ambiguous["message"])
+
+    def test_find_ranks_exact_case_and_prefix_before_partial(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            desktop = os.path.join(tmpdir, "Desktop")
+            os.makedirs(os.path.join(desktop, "AIRA"))
+            os.makedirs(os.path.join(desktop, "AIRA_some_asset"))
+            os.makedirs(os.path.join(desktop, "project_AIRA"))
+            with patch("tools.filesystem.resolve_location", side_effect=lambda name: desktop):
+                result = find_file_or_folder("AIRA")
+            self.assertEqual(os.path.basename(result["matches"][0]), "AIRA")
+            self.assertEqual(os.path.basename(result["matches"][1]), "AIRA_some_asset")
 
     def test_valid_remembered_path_reused(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -656,6 +1032,24 @@ class TestSystemAgent(unittest.TestCase):
             self.assertTrue(should_continue)
             self.assertIn("Found:", msg)
             self.assertIn(r"C:\Users\Desktop\test", msg)
+
+        with patch("agent.copy_file_or_folder", return_value={"success": True, "source": r"C:\src\report.pdf", "destination": r"C:\dst\report.pdf", "message": "Copied 'report.pdf' to desktop."}) as mock_copy:
+            should_continue, msg = handle_command("copy report.pdf to desktop")
+            self.assertTrue(should_continue)
+            self.assertEqual(msg, "Copied 'report.pdf' to desktop.")
+            mock_copy.assert_called_once_with("report.pdf", "desktop")
+
+        with patch("agent.move_file_or_folder", return_value={"success": True, "message": "Moved successfully."}) as mock_move:
+            should_continue, msg = handle_command("MOVE report.pdf TO desktop")
+            self.assertTrue(should_continue)
+            self.assertEqual(msg, "Moved successfully.")
+            mock_move.assert_called_once_with("report.pdf", "desktop")
+
+        with patch("agent.rename_file_or_folder", return_value={"success": True, "message": "Renamed successfully."}) as mock_rename:
+            should_continue, msg = handle_command("RENAME report.pdf TO final_report")
+            self.assertTrue(should_continue)
+            self.assertEqual(msg, "Renamed successfully.")
+            mock_rename.assert_called_once_with("report.pdf", "final_report")
 
     def test_handle_command_exit_quit(self):
         for cmd in ["exit", "quit", "EXIT", "QUIT"]:
