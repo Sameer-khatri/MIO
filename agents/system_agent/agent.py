@@ -85,6 +85,39 @@ from tools.power import (
 from tools.screen import (
     take_screenshot,
 )
+from tools.notifications import (
+    play_chime,
+    show_notification,
+)
+from tools.browser import (
+    open_url,
+    search_web,
+    open_incognito,
+)
+from tools.mouse import (
+    get_cursor_position,
+    move_cursor,
+    click,
+    right_click,
+    double_click,
+    mouse_scroll,
+)
+from tools.archive import (
+    create_zip,
+    extract_zip,
+    list_zip_contents,
+)
+from tools.settings import (
+    get_theme_mode,
+    set_theme_mode,
+    get_accent_color,
+)
+from tools.timer import (
+    get_system_uptime,
+    start_timer,
+    list_active_timers,
+)
+
 
 
 def extract_where_target(user_input: str) -> str | None:
@@ -290,6 +323,149 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         custom_name = re.sub(r"^(screenshot|take screenshot)\s+", "", cleaned, flags=re.I).strip()
         res = take_screenshot(custom_name)
         return True, res.get("message")
+
+    # 10. Notifications & Audio Chimes
+    if lower_input.startswith("play chime") or lower_input.startswith("play sound"):
+        snd_type = re.sub(r"^(play chime|play sound)\s*", "", lower_input).strip() or "asterisk"
+        res = play_chime(snd_type)
+        return True, res.get("message")
+    if lower_input.startswith("notify ") or lower_input.startswith("show notification "):
+        raw_msg = re.sub(r"^(notify|show notification)\s+", "", cleaned, flags=re.I).strip()
+        if "|" in raw_msg:
+            title_part, msg_part = raw_msg.split("|", 1)
+            res = show_notification(title_part.strip(), msg_part.strip())
+        else:
+            res = show_notification("MIO Alert", raw_msg)
+        return True, res.get("message")
+
+    # 11. Browser & Web Search Hands
+    if lower_input.startswith("open url ") or lower_input.startswith("browse "):
+        target_url = re.sub(r"^(open url|browse)\s+", "", cleaned, flags=re.I).strip()
+        res = open_url(target_url)
+        return True, res.get("message")
+    if lower_input.startswith("search youtube for "):
+        q = cleaned[19:].strip()
+        res = search_web(q, engine="youtube")
+        return True, res.get("message")
+    if lower_input.startswith("search bing for "):
+        q = cleaned[16:].strip()
+        res = search_web(q, engine="bing")
+        return True, res.get("message")
+    if lower_input.startswith("search google for "):
+        q = cleaned[18:].strip()
+        res = search_web(q, engine="google")
+        return True, res.get("message")
+    if lower_input.startswith("search for ") or lower_input.startswith("search "):
+        q = re.sub(r"^(search for|search)\s+", "", cleaned, flags=re.I).strip()
+        res = search_web(q, engine="google")
+        return True, res.get("message")
+    if lower_input.startswith("open incognito") or lower_input.startswith("incognito"):
+        target_url = re.sub(r"^(open incognito|incognito)\s*", "", cleaned, flags=re.I).strip()
+        res = open_incognito(target_url)
+        return True, res.get("message")
+
+    # 12. Mouse Control Hands
+    if lower_input in ("get cursor pos", "cursor pos", "cursor position", "mouse pos", "mouse position"):
+        res = get_cursor_position()
+        return True, res.get("message")
+    if lower_input.startswith("move cursor ") or lower_input.startswith("move mouse "):
+        coords = re.sub(r"^(move cursor to|move mouse to|move cursor|move mouse)\s*", "", lower_input).strip()
+        parts = re.split(r"[,\s]+", coords)
+        if len(parts) >= 2:
+            res = move_cursor(parts[0], parts[1])
+            return True, res.get("message")
+        return True, "Please provide X and Y coordinates. Example: 'move cursor 500 300'"
+    if lower_input in ("right click", "right-click"):
+        res = right_click()
+        return True, res.get("message")
+    if lower_input in ("double click", "double-click"):
+        res = double_click()
+        return True, res.get("message")
+    if lower_input in ("click", "click mouse", "left click"):
+        res = click("left")
+        return True, res.get("message")
+    if lower_input.startswith("scroll up"):
+        amount_match = re.search(r"scroll up\s+(\d+)", lower_input)
+        val = int(amount_match.group(1)) if amount_match else 120
+        res = mouse_scroll(val)
+        return True, res.get("message")
+    if lower_input.startswith("scroll down"):
+        amount_match = re.search(r"scroll down\s+(\d+)", lower_input)
+        val = -(int(amount_match.group(1))) if amount_match else -120
+        res = mouse_scroll(val)
+        return True, res.get("message")
+    if lower_input.startswith("scroll ") or lower_input.startswith("mouse scroll "):
+        amt = re.sub(r"^(scroll|mouse scroll)\s*", "", lower_input).strip()
+        try:
+            res = mouse_scroll(int(amt))
+            return True, res.get("message")
+        except ValueError:
+            return True, "Please specify a scroll amount. Example: 'scroll up' or 'scroll -120'"
+
+    # 13. File Archive Hands (Zip / Unzip)
+    if lower_input.startswith("zip ") or lower_input.startswith("compress "):
+        raw_cmd = re.sub(r"^(zip|compress)\s+", "", cleaned, flags=re.I).strip()
+        if " to " in raw_cmd:
+            src_part, dest_part = raw_cmd.split(" to ", 1)
+            res = create_zip(src_part.strip(), dest_part.strip())
+        else:
+            res = create_zip(raw_cmd)
+        return True, res.get("message")
+    if lower_input.startswith("unzip ") or lower_input.startswith("extract "):
+        raw_cmd = re.sub(r"^(unzip|extract)\s+", "", cleaned, flags=re.I).strip()
+        if " to " in raw_cmd:
+            src_part, dest_part = raw_cmd.split(" to ", 1)
+            res = extract_zip(src_part.strip(), dest_part.strip())
+        else:
+            res = extract_zip(raw_cmd)
+        return True, res.get("message")
+    if lower_input.startswith("list zip ") or lower_input.startswith("inspect zip "):
+        raw_zip = re.sub(r"^(list zip|inspect zip)\s+", "", cleaned, flags=re.I).strip()
+        res = list_zip_contents(raw_zip)
+        if res.get("success"):
+            files = res.get("files", [])
+            lines = [res.get("message", "")]
+            for f in files[:15]:
+                d_marker = "[DIR] " if f.get("is_dir") else ""
+                lines.append(f"  - {d_marker}{f.get('filename')} ({f.get('file_size')} bytes)")
+            if len(files) > 15:
+                lines.append(f"  ... and {len(files) - 15} more files.")
+            return True, "\n".join(lines)
+        return True, res.get("message")
+
+    # 14. Windows Settings & Personalization
+    if lower_input in ("show theme", "get theme", "theme", "what theme"):
+        res = get_theme_mode()
+        return True, res.get("message")
+    if lower_input in ("set theme dark", "dark mode", "enable dark mode", "set dark mode"):
+        res = set_theme_mode("dark")
+        return True, res.get("message")
+    if lower_input in ("set theme light", "light mode", "enable light mode", "set light mode"):
+        res = set_theme_mode("light")
+        return True, res.get("message")
+    if lower_input in ("show accent color", "accent color", "get accent color"):
+        res = get_accent_color()
+        return True, res.get("message")
+
+    # 15. Timers & Uptime
+    if lower_input in ("system uptime", "uptime", "show uptime"):
+        res = get_system_uptime()
+        return True, res.get("message")
+    if lower_input.startswith("set timer ") or lower_input.startswith("timer "):
+        remainder = re.sub(r"^(set timer|timer)\s+", "", cleaned, flags=re.I).strip()
+        parts = remainder.split(maxsplit=1)
+        sec_str = parts[0]
+        label = parts[1] if len(parts) > 1 else "Timer"
+        try:
+            sec_val = int(sec_str)
+            res = start_timer(sec_val, label)
+            return True, res.get("message")
+        except ValueError:
+            return True, "Please specify duration in seconds. Example: 'set timer 60 Pizza'"
+    if lower_input in ("show timers", "active timers", "list timers"):
+        res = list_active_timers()
+        return True, res.get("message")
+
 
     # 10. System Information commands
     if lower_input in ("show system info", "system info"):

@@ -1585,8 +1585,315 @@ class TestSystemAgent(unittest.TestCase):
             self.assertTrue(cont)
             self.assertEqual(msg, "Screenshot saved")
 
+    # -------------------------------------------------------------------------
+    # Tests for Notifications & Chimes
+    # -------------------------------------------------------------------------
+
+    def test_notifications_play_chime(self):
+        from tools.notifications import play_chime
+        with patch("tools.notifications.winsound.MessageBeep", return_value=None):
+            res = play_chime("asterisk")
+            self.assertTrue(res["success"])
+            self.assertIn("asterisk", res["message"])
+
+        with patch("tools.notifications.winsound.MessageBeep", side_effect=RuntimeError("Sound card error")):
+            err_res = play_chime("asterisk")
+            self.assertFalse(err_res["success"])
+            self.assertIn("Failed", err_res["message"])
+
+    def test_notifications_show_notification(self):
+        from tools.notifications import show_notification
+        with patch("tools.notifications.subprocess.Popen") as mock_popen, \
+             patch("tools.notifications.play_chime") as mock_chime:
+            res = show_notification("Meeting", "Starts in 5 minutes", with_chime=True)
+            self.assertTrue(res["success"])
+            self.assertEqual(res["title"], "Meeting")
+            self.assertEqual(res["body"], "Starts in 5 minutes")
+            mock_chime.assert_called_once_with("asterisk")
+            mock_popen.assert_called_once()
+
+    # -------------------------------------------------------------------------
+    # Tests for Browser & Web Search
+    # -------------------------------------------------------------------------
+
+    def test_browser_open_url(self):
+        from tools.browser import open_url
+        with patch("tools.browser.webbrowser.open") as mock_open:
+            res = open_url("github.com")
+            self.assertTrue(res["success"])
+            self.assertEqual(res["url"], "https://github.com")
+            mock_open.assert_called_once_with("https://github.com", new=2)
+
+        invalid_res = open_url("")
+        self.assertFalse(invalid_res["success"])
+
+    def test_browser_search_web(self):
+        from tools.browser import search_web
+        with patch("tools.browser.open_url", return_value={"success": True}) as mock_open:
+            res = search_web("python tutorials", engine="google")
+            self.assertTrue(res["success"])
+            self.assertIn("google.com/search?q=python+tutorials", res["url"])
+
+            yt_res = search_web("lofi hip hop", engine="youtube")
+            self.assertTrue(yt_res["success"])
+            self.assertIn("youtube.com/results?search_query=lofi+hip+hop", yt_res["url"])
+
+            bing_res = search_web("weather", engine="bing")
+            self.assertTrue(bing_res["success"])
+            self.assertIn("bing.com/search?q=weather", bing_res["url"])
+
+    def test_browser_open_incognito(self):
+        from tools.browser import open_incognito
+        with patch("tools.browser.shutil.which", side_effect=lambda x: "C:\\chrome.exe" if x == "chrome.exe" else None), \
+             patch("tools.browser.subprocess.Popen") as mock_popen:
+            res = open_incognito("https://example.com")
+            self.assertTrue(res["success"])
+            self.assertEqual(res["browser"], "chrome.exe")
+            mock_popen.assert_called_once()
+
+    # -------------------------------------------------------------------------
+    # Tests for Mouse Hands
+    # -------------------------------------------------------------------------
+
+    def test_mouse_cursor_position(self):
+        from tools.mouse import get_cursor_position
+        with patch("tools.mouse.user32.GetCursorPos") as mock_pos:
+            def fake_get_pos(pt_ref):
+                pt_ref._obj.x = 450
+                pt_ref._obj.y = 350
+                return 1
+            mock_pos.side_effect = fake_get_pos
+
+            res = get_cursor_position()
+            self.assertTrue(res["success"])
+            self.assertEqual(res["x"], 450)
+            self.assertEqual(res["y"], 350)
+
+    def test_mouse_move_cursor(self):
+        from tools.mouse import move_cursor
+        with patch("tools.mouse.user32.SetCursorPos", return_value=1) as mock_set:
+            res = move_cursor(100, 200)
+            self.assertTrue(res["success"])
+            self.assertEqual(res["x"], 100)
+            self.assertEqual(res["y"], 200)
+            mock_set.assert_called_once_with(100, 200)
+
+        err_res = move_cursor("bad", 200)
+        self.assertFalse(err_res["success"])
+
+    def test_mouse_clicks_and_scroll(self):
+        from tools.mouse import click, right_click, double_click, mouse_scroll
+        with patch("tools.mouse.user32.mouse_event") as mock_event, \
+             patch("tools.mouse.get_cursor_position", return_value={"x": 100, "y": 100}):
+            left_res = click("left")
+            self.assertTrue(left_res["success"])
+
+            right_res = right_click()
+            self.assertTrue(right_res["success"])
+            self.assertEqual(right_res["button"], "right")
+
+            dbl_res = double_click()
+            self.assertTrue(dbl_res["success"])
+            self.assertTrue(dbl_res["double"])
+
+            scroll_res = mouse_scroll(240)
+            self.assertTrue(scroll_res["success"])
+            self.assertEqual(scroll_res["amount"], 240)
+
+    # -------------------------------------------------------------------------
+    # Tests for File Archives (Zip / Unzip)
+    # -------------------------------------------------------------------------
+
+    def test_archive_zip_and_unzip(self):
+        from tools.archive import create_zip, extract_zip, list_zip_contents
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sample_file = os.path.join(tmpdir, "sample.txt")
+            with open(sample_file, "w", encoding="utf-8") as f:
+                f.write("Hello MIO Archive Testing!")
+
+            # Zip creation
+            zip_target = os.path.join(tmpdir, "test.zip")
+            res_zip = create_zip(sample_file, zip_target)
+            self.assertTrue(res_zip["success"])
+            self.assertTrue(os.path.exists(zip_target))
+            self.assertEqual(res_zip["file_count"], 1)
+
+            # Inspect contents
+            res_list = list_zip_contents(zip_target)
+            self.assertTrue(res_list["success"])
+            self.assertEqual(res_list["total_items"], 1)
+            self.assertEqual(res_list["files"][0]["filename"], "sample.txt")
+
+            # Extract archive
+            dest_dir = os.path.join(tmpdir, "extracted")
+            res_extract = extract_zip(zip_target, dest_dir)
+            self.assertTrue(res_extract["success"])
+            self.assertEqual(res_extract["extracted_count"], 1)
+            extracted_file = os.path.join(dest_dir, "sample.txt")
+            self.assertTrue(os.path.exists(extracted_file))
+
+    def test_archive_zip_slip_protection(self):
+        import zipfile
+        from tools.archive import extract_zip
+        with tempfile.TemporaryDirectory() as tmpdir:
+            malicious_zip = os.path.join(tmpdir, "malicious.zip")
+            with zipfile.ZipFile(malicious_zip, "w") as zf:
+                zf.writestr("../../evil.txt", "pwned")
+
+            res = extract_zip(malicious_zip, os.path.join(tmpdir, "safe_dir"))
+            self.assertFalse(res["success"])
+            self.assertIn("Zip contains unsafe path", res["message"])
+
+
+    # -------------------------------------------------------------------------
+    # Tests for Settings (Theme & Accent)
+    # -------------------------------------------------------------------------
+
+    def test_settings_get_and_set_theme(self):
+        from tools.settings import get_theme_mode, set_theme_mode, get_accent_color
+        with patch("tools.settings.winreg.OpenKey"), \
+             patch("tools.settings.winreg.QueryValueEx", side_effect=[(0, 4), (0, 4)]):
+            theme_res = get_theme_mode()
+            self.assertTrue(theme_res["success"])
+            self.assertEqual(theme_res["theme"], "dark")
+
+        with patch("tools.settings.winreg.OpenKey"), \
+             patch("tools.settings.winreg.SetValueEx") as mock_set_val:
+            set_res = set_theme_mode("light")
+            self.assertTrue(set_res["success"])
+            self.assertEqual(set_res["theme"], "light")
+            self.assertEqual(mock_set_val.call_count, 2)
+
+        with patch("tools.settings.winreg.OpenKey"), \
+             patch("tools.settings.winreg.QueryValueEx", return_value=(0xC40078D7, 4)):
+            accent_res = get_accent_color()
+            self.assertTrue(accent_res["success"])
+            self.assertEqual(accent_res["accent_hex"], "#0078D7")
+
+    # -------------------------------------------------------------------------
+    # Tests for Timer & Uptime
+    # -------------------------------------------------------------------------
+
+    def test_timer_uptime(self):
+        from tools.timer import get_system_uptime
+        with patch("tools.timer.kernel32.GetTickCount64", return_value=3661000):
+            res = get_system_uptime()
+            self.assertTrue(res["success"])
+            self.assertEqual(res["hours"], 1)
+            self.assertEqual(res["minutes"], 1)
+            self.assertEqual(res["seconds"], 1)
+
+    def test_timer_countdown(self):
+        from tools.timer import start_timer, list_active_timers
+        with patch("tools.timer.threading.Thread.start"):
+            res = start_timer(60, "Tea")
+            self.assertTrue(res["success"])
+            self.assertEqual(res["label"], "Tea")
+            self.assertEqual(res["duration_seconds"], 60)
+
+        err_res = start_timer(-5)
+        self.assertFalse(err_res["success"])
+
+    # -------------------------------------------------------------------------
+    # Tests for Agent Command Routing for 6 New Tools
+    # -------------------------------------------------------------------------
+
+    def test_agent_new_hand_commands_routing(self):
+        from agent import handle_command
+
+        with patch("agent.play_chime", return_value={"message": "Played asterisk"}):
+            cont, msg = handle_command("play chime asterisk")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Played asterisk")
+
+        with patch("agent.show_notification", return_value={"message": "Notification sent"}):
+            cont, msg = handle_command("notify Meeting | Starts now")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Notification sent")
+
+        with patch("agent.open_url", return_value={"message": "Opened url"}):
+            cont, msg = handle_command("open url https://github.com")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Opened url")
+
+        with patch("agent.search_web", return_value={"message": "Searching google"}):
+            cont, msg = handle_command("search python tutorial")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Searching google")
+
+        with patch("agent.search_web", return_value={"message": "Searching youtube"}):
+            cont, msg = handle_command("search youtube for lo-fi")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Searching youtube")
+
+        with patch("agent.open_incognito", return_value={"message": "Incognito opened"}):
+            cont, msg = handle_command("open incognito https://google.com")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Incognito opened")
+
+        with patch("agent.get_cursor_position", return_value={"message": "X=100, Y=200"}):
+            cont, msg = handle_command("get cursor pos")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "X=100, Y=200")
+
+        with patch("agent.move_cursor", return_value={"message": "Moved to 300, 400"}):
+            cont, msg = handle_command("move cursor 300 400")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Moved to 300, 400")
+
+        with patch("agent.click", return_value={"message": "Clicked"}):
+            cont, msg = handle_command("click")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Clicked")
+
+        with patch("agent.right_click", return_value={"message": "Right-clicked"}):
+            cont, msg = handle_command("right click")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Right-clicked")
+
+        with patch("agent.double_click", return_value={"message": "Double-clicked"}):
+            cont, msg = handle_command("double click")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Double-clicked")
+
+        with patch("agent.mouse_scroll", return_value={"message": "Scrolled up"}):
+            cont, msg = handle_command("scroll up 120")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Scrolled up")
+
+        with patch("agent.create_zip", return_value={"message": "Created zip"}):
+            cont, msg = handle_command("zip folder to backup.zip")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Created zip")
+
+        with patch("agent.extract_zip", return_value={"message": "Extracted zip"}):
+            cont, msg = handle_command("unzip backup.zip to folder")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Extracted zip")
+
+        with patch("agent.get_theme_mode", return_value={"message": "Theme is dark"}):
+            cont, msg = handle_command("show theme")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Theme is dark")
+
+        with patch("agent.set_theme_mode", return_value={"message": "Switched to dark"}):
+            cont, msg = handle_command("set theme dark")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Switched to dark")
+
+        with patch("agent.get_system_uptime", return_value={"message": "Uptime: 2 hours"}):
+            cont, msg = handle_command("system uptime")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Uptime: 2 hours")
+
+        with patch("agent.start_timer", return_value={"message": "Timer started"}):
+            cont, msg = handle_command("set timer 120 Coffee")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Timer started")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
