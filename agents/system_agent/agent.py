@@ -23,7 +23,37 @@ from tools.filesystem import (
     copy_file_or_folder,
     move_file_or_folder,
     rename_file_or_folder,
+    delete_file_or_folder,
     locate_executable,
+)
+from tools.windows import (
+    list_windows,
+    minimize_window,
+    maximize_window,
+    restore_window,
+    bring_to_foreground,
+    close_application,
+    restart_application,
+)
+from tools.system_info import (
+    get_system_info,
+    get_cpu_usage,
+    get_ram_usage,
+    get_disk_space,
+    get_gpu_info,
+    get_gpu_usage,
+)
+from tools.ports import (
+    get_listening_ports,
+    what_is_using_port,
+    is_port_free,
+)
+from tools.network import (
+    get_network_info,
+    get_ip_address,
+    get_wifi_info,
+    is_connected_to_internet,
+    ping_host,
 )
 
 
@@ -32,13 +62,11 @@ def extract_where_target(user_input: str) -> str | None:
     cleaned = user_input.strip()
     lower = cleaned.lower().rstrip("?").strip()
 
-    # "where is <tool>" / "where is <tool>?"
     if lower.startswith("where is "):
         target = cleaned[9:].rstrip("?").strip()
         if target:
             return target
 
-    # "where <tool>" / "where <tool>?"
     if lower.startswith("where "):
         target = cleaned[6:].rstrip("?").strip()
         if target:
@@ -52,7 +80,6 @@ def extract_is_running_target(user_input: str) -> str | None:
     cleaned = user_input.strip()
     lower = cleaned.lower().rstrip("?").strip()
 
-    # "is <app> running" / "is <app> running?"
     if lower.startswith("is ") and lower.endswith(" running"):
         target = cleaned[3:].rstrip("?").strip()
         if target.lower().endswith("running"):
@@ -60,7 +87,6 @@ def extract_is_running_target(user_input: str) -> str | None:
             if target:
                 return target
 
-    # "check if <app> is running"
     if lower.startswith("check if ") and lower.endswith(" is running"):
         target = cleaned[9:].rstrip("?").strip()
         if target.lower().endswith("is running"):
@@ -68,7 +94,6 @@ def extract_is_running_target(user_input: str) -> str | None:
             if target:
                 return target
 
-    # "check if <app> running"
     if lower.startswith("check if ") and lower.endswith(" running"):
         target = cleaned[9:].rstrip("?").strip()
         if target.lower().endswith("running"):
@@ -93,7 +118,7 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     if not cleaned:
         return True, None
 
-    lower_input = cleaned.lower()
+    lower_input = cleaned.lower().rstrip("?").strip()
 
     # 1. Exit / Quit handling
     if lower_input in ("exit", "quit"):
@@ -153,7 +178,99 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
             return True, "No running applications found."
         return True, result.get("message", "Failed to inspect running applications.")
 
-    # 5. "show files in <folder>" / "list files in <folder>"
+    # 5. System Information commands
+    if lower_input in ("show system info", "system info"):
+        res = get_system_info()
+        return True, res.get("message")
+    if lower_input in ("show cpu usage", "cpu usage", "show cpu", "cpu"):
+        res = get_cpu_usage()
+        return True, res.get("message")
+    if lower_input in ("show ram usage", "ram usage", "show ram", "ram", "memory usage"):
+        res = get_ram_usage()
+        return True, res.get("message")
+    if lower_input in ("show disk space", "disk space", "show disk", "disk"):
+        res = get_disk_space("C:\\")
+        return True, res.get("message")
+    if lower_input in ("show gpu info", "gpu info"):
+        res = get_gpu_info()
+        return True, res.get("message")
+    if lower_input in ("show gpu usage", "gpu usage", "gpu"):
+        res = get_gpu_usage()
+        return True, res.get("message")
+
+    # 6. Ports commands
+    if lower_input in ("show listening ports", "listening ports", "show ports", "ports"):
+        res = get_listening_ports()
+        return True, res.get("message")
+    if lower_input.startswith("what is using port ") or lower_input.startswith("what is on port "):
+        port_str = re.sub(r"^(what is using port|what is on port)\s+", "", lower_input).strip()
+        res = what_is_using_port(port_str)
+        return True, res.get("message")
+    if lower_input.startswith("is port ") and (lower_input.endswith(" free") or lower_input.endswith(" available")):
+        match = re.search(r"^is port\s+(\d+)\s+(free|available)$", lower_input)
+        if match:
+            res = is_port_free(match.group(1))
+            return True, res.get("message")
+
+    # 7. Network commands
+    if lower_input in ("show network info", "network info", "network"):
+        res = get_network_info()
+        return True, res.get("message")
+    if lower_input in ("show ip address", "ip address", "ip", "show ip"):
+        res = get_ip_address()
+        return True, res.get("message")
+    if lower_input in ("show wifi info", "wifi info", "wifi"):
+        res = get_wifi_info()
+        return True, res.get("message")
+    if lower_input in ("am i connected to internet", "am i connected to the internet", "is internet connected", "check internet"):
+        res = is_connected_to_internet()
+        return True, res.get("message")
+    if lower_input.startswith("ping "):
+        target_host = cleaned[5:].strip()
+        res = ping_host(target_host)
+        return True, res.get("message")
+
+    # 8. Window management commands
+    if lower_input.startswith("minimize "):
+        target_app = cleaned[9:].strip()
+        res = minimize_window(target_app)
+        return True, res.get("message")
+    if lower_input.startswith("maximize "):
+        target_app = cleaned[9:].strip()
+        res = maximize_window(target_app)
+        return True, res.get("message")
+    if lower_input.startswith("restore "):
+        target_app = cleaned[8:].strip()
+        res = restore_window(target_app)
+        return True, res.get("message")
+    if lower_input.startswith("bring ") and (lower_input.endswith(" to front") or lower_input.endswith(" forward")):
+        target = re.sub(r"^bring\s+", "", cleaned, flags=re.IGNORECASE)
+        target = re.sub(r"\s+(to front|forward)$", "", target, flags=re.IGNORECASE).strip()
+        res = bring_to_foreground(target)
+        return True, res.get("message")
+    if lower_input.startswith("switch to "):
+        target = cleaned[10:].strip()
+        res = bring_to_foreground(target)
+        return True, res.get("message")
+    if lower_input.startswith("show windows for ") or lower_input.startswith("list windows for "):
+        target = re.sub(r"^(show windows for|list windows for)\s+", "", cleaned, flags=re.IGNORECASE).strip()
+        res = list_windows(target)
+        return True, res.get("message")
+    if lower_input in ("show windows", "list windows"):
+        res = list_windows()
+        return True, res.get("message")
+
+    # 9. Application lifecycle: close & restart
+    if lower_input.startswith("close "):
+        target_app = cleaned[6:].strip()
+        res = close_application(target_app)
+        return True, res.get("message")
+    if lower_input.startswith("restart "):
+        target_app = cleaned[8:].strip()
+        res = restart_application(target_app)
+        return True, res.get("message")
+
+    # 10. Filesystem: list, create, copy, move, rename, delete, find
     if lower_input.startswith("show files in ") or lower_input.startswith("list files in "):
         folder_query = cleaned[14:].strip()
         if not folder_query:
@@ -168,7 +285,6 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
             return True, f"No files found in {loc_title}."
         return True, result.get("message", f"Failed to list files in {folder_query}.")
 
-    # 6. "create folder <name> in <location>"
     if lower_input.startswith("create folder "):
         remainder = cleaned[14:].strip()
         match = re.search(r"^(.*?)\s+in\s+(.*)$", remainder, re.IGNORECASE)
@@ -183,7 +299,6 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
             return True, f"✅ {result.get('message')}"
         return True, result.get("message", f"Failed to create folder '{folder_name}'.")
 
-    # 7. "copy <file or folder> to <location>"
     if lower_input.startswith("copy "):
         remainder = cleaned[5:].strip()
         match = re.search(r"^(.*?)\s+to\s+(.*)$", remainder, re.IGNORECASE)
@@ -194,7 +309,6 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         result = copy_file_or_folder(source_query, location_name)
         return True, result.get("message", f"Failed to copy '{source_query}'.")
 
-    # 8. "move <file or folder> to <location>"
     if lower_input.startswith("move "):
         remainder = cleaned[5:].strip()
         match = re.search(r"^(.*?)\s+to\s+(.*)$", remainder, re.IGNORECASE)
@@ -205,7 +319,6 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         result = move_file_or_folder(source_query, location_name)
         return True, result.get("message", f"Failed to move '{source_query}'.")
 
-    # 9. "rename <file or folder> to <new name>"
     if lower_input.startswith("rename "):
         remainder = cleaned[7:].strip()
         match = re.search(r"^(.*?)\s+to\s+(.*)$", remainder, re.IGNORECASE)
@@ -216,7 +329,11 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         result = rename_file_or_folder(source_query, new_name)
         return True, result.get("message", f"Failed to rename '{source_query}'.")
 
-    # 10. "find <file or folder>"
+    if lower_input.startswith("delete "):
+        target = cleaned[7:].strip()
+        result = delete_file_or_folder(target)
+        return True, result.get("message", f"Failed to delete '{target}'.")
+
     if lower_input.startswith("find "):
         query = cleaned[5:].strip()
         if not query:
@@ -237,7 +354,6 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
             return True, "Please specify an application to open. Example: 'open calculator'"
 
         result = open_application(raw_target)
-
         if result.get("success"):
             return True, f"✅ {result.get('message')}"
         return True, result.get("message")
@@ -245,7 +361,7 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     if lower_input == "open":
         return True, "Please specify an application to open. Example: 'open calculator'"
 
-    return True, f"Unknown command: '{cleaned}'. Type 'open <app>', 'where is <tool>?', 'is <app> running?', 'show files in <folder>', 'find <name>', 'copy <file or folder> to <location>', 'move <file or folder> to <location>', 'rename <file or folder> to <new name>', 'create folder <name> in <location>', or 'exit'."
+    return True, f"Unknown command: '{cleaned}'. Type 'open <app>', 'where is <tool>?', 'is <app> running?', 'show system info', 'show network info', 'show listening ports', 'close <app>', 'minimize <app>', 'delete <file>', etc."
 
 
 def run_agent():

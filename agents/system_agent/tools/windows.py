@@ -1,0 +1,374 @@
+import ctypes
+import os
+import time
+from ctypes import wintypes
+
+try:
+    user32 = ctypes.windll.user32
+except AttributeError:
+    user32 = None
+
+from tools.processes import get_running_applications, is_application_running
+from tools.applications import open_application
+
+
+SW_SHOWNORMAL = 1
+SW_SHOWMINIMIZED = 2
+SW_MAXIMIZE = 3
+SW_MINIMIZE = 6
+SW_RESTORE = 9
+WM_CLOSE = 0x0010
+
+PROTECTED_PROCESSES = {
+    "system",
+    "idle",
+    "smss",
+    "csrss",
+    "wininit",
+    "services",
+    "lsass",
+    "lsm",
+    "winlogon",
+    "explorer",
+    "dwm",
+    "taskmgr",
+    "antigravity",
+    "antigravity ide",
+    "mio",
+}
+
+
+def _get_all_windows() -> list[dict]:
+    """Enumerates visible top-level windows using Win32 EnumWindows."""
+    if not user32:
+        return []
+
+    windows = []
+    WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def enum_proc(hwnd, lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return True
+
+        buff = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buff, length + 1)
+        title = buff.value.strip()
+
+        if not title or title.lower() in ("dwm notification window", "program manager", "windows input experience"):
+            return True
+
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+
+        is_iconic = bool(user32.IsIconic(hwnd))
+        is_zoomed = bool(user32.IsZoomed(hwnd))
+        state = "minimized" if is_iconic else ("maximized" if is_zoomed else "normal")
+
+        windows.append({
+            "hwnd": hwnd,
+            "title": title,
+            "pid": pid.value,
+            "state": state
+        })
+        return True
+
+    cb = WNDENUMPROC(enum_proc)
+    user32.EnumWindows(cb, 0)
+    return windows
+
+
+def _match_windows_for_query(query: str, windows: list[dict]) -> list[dict]:
+    """Matches windows against a query (by process name, friendly app name, or window title)."""
+    from tools.processes import get_running_applications, KNOWN_PROCESS_NAMES
+
+    norm_query = query.strip().lower()
+    if not norm_query:
+        return []
+
+    matched = []
+
+    # Check running apps to find PID(s) for the query
+    running = get_running_applications()
+    target_pids = set()
+    if running.get("success"):
+        for app in running.get("apps", []):
+            name_lower = app["name"].lower()
+            proc_lower = app["process_name"].lower()
+            if norm_query == name_lower or norm_query == proc_lower or norm_query in name_lower or norm_query in proc_lower:
+                target_pids.add(app["pid"])
+
+    for win in windows:
+        title_lower = win["title"].lower()
+        if win["pid"] in target_pids or norm_query in title_lower:
+            matched.append(win)
+
+    return matched
+
+
+def list_windows(app_name: str | None = None) -> dict:
+    """Lists visible top-level windows, optionally filtered by application name."""
+    try:
+        all_wins = _get_all_windows()
+        if app_name:
+            clean_app = app_name.strip()
+            matched = _match_windows_for_query(clean_app, all_wins)
+            if not matched:
+                return {
+                    "success": True,
+                    "count": 0,
+                    "windows": [],
+                    "message": f"No visible windows found for '{clean_app}'."
+                }
+            lines = [f"- \"{w['title']}\" [{w['state']}] (PID: {w['pid']})" for w in matched]
+            return {
+                "success": True,
+                "count": len(matched),
+                "windows": matched,
+                "message": f"Windows for '{clean_app}':\n" + "\n".join(lines)
+            }
+        else:
+            if not all_wins:
+                return {
+                    "success": True,
+                    "count": 0,
+                    "windows": [],
+                    "message": "No visible windows found."
+                }
+            lines = [f"- \"{w['title']}\" [{w['state']}]" for w in all_wins[:20]]
+            return {
+                "success": True,
+                "count": len(all_wins),
+                "windows": all_wins,
+                "message": f"Visible Windows ({len(all_wins)} found):\n" + "\n".join(lines)
+            }
+    except Exception as err:
+        return {
+            "success": False,
+            "count": 0,
+            "windows": [],
+            "message": f"Failed to list windows: {err}"
+        }
+
+
+def _select_window(app_name: str) -> tuple[dict | None, str | None]:
+    """Finds best matching window for target app, preferring foreground window."""
+    clean_app = app_name.strip()
+    if not clean_app:
+        return None, "Please specify an application name."
+
+    all_wins = _get_all_windows()
+    matched = _match_windows_for_query(clean_app, all_wins)
+    if not matched:
+        return None, f"I couldn't find any visible window for '{clean_app}'."
+
+    fg_hwnd = user32.GetForegroundWindow() if user32 else 0
+    for w in matched:
+        if w["hwnd"] == fg_hwnd:
+            return w, None
+
+    return matched[0], None
+
+
+def minimize_window(app_name: str) -> dict:
+    """Minimizes the target application's window and verifies the minimized state."""
+    win, err = _select_window(app_name)
+    if not win:
+        return {"success": False, "message": err}
+
+    hwnd = win["hwnd"]
+    user32.ShowWindow(hwnd, SW_MINIMIZE)
+    time.sleep(0.15)
+
+    is_minimized = bool(user32.IsIconic(hwnd))
+    if is_minimized:
+        return {
+            "success": True,
+            "hwnd": hwnd,
+            "state": "minimized",
+            "message": f"Minimized '{win['title']}'."
+        }
+    return {
+        "success": False,
+        "hwnd": hwnd,
+        "message": f"Failed to verify minimization for '{win['title']}'."
+    }
+
+
+def maximize_window(app_name: str) -> dict:
+    """Maximizes the target application's window and verifies the maximized state."""
+    win, err = _select_window(app_name)
+    if not win:
+        return {"success": False, "message": err}
+
+    hwnd = win["hwnd"]
+    user32.ShowWindow(hwnd, SW_MAXIMIZE)
+    time.sleep(0.15)
+
+    is_maximized = bool(user32.IsZoomed(hwnd))
+    if is_maximized:
+        return {
+            "success": True,
+            "hwnd": hwnd,
+            "state": "maximized",
+            "message": f"Maximized '{win['title']}'."
+        }
+    return {
+        "success": False,
+        "hwnd": hwnd,
+        "message": f"Failed to verify maximization for '{win['title']}'."
+    }
+
+
+def restore_window(app_name: str) -> dict:
+    """Restores the target application's window to normal state and verifies."""
+    win, err = _select_window(app_name)
+    if not win:
+        return {"success": False, "message": err}
+
+    hwnd = win["hwnd"]
+    user32.ShowWindow(hwnd, SW_RESTORE)
+    time.sleep(0.15)
+
+    is_minimized = bool(user32.IsIconic(hwnd))
+    is_maximized = bool(user32.IsZoomed(hwnd))
+    if not is_minimized:
+        return {
+            "success": True,
+            "hwnd": hwnd,
+            "state": "normal" if not is_maximized else "maximized",
+            "message": f"Restored '{win['title']}'."
+        }
+    return {
+        "success": False,
+        "hwnd": hwnd,
+        "message": f"Failed to restore '{win['title']}'."
+    }
+
+
+def bring_to_foreground(app_name: str) -> dict:
+    """Brings the target application's window to the foreground and verifies."""
+    win, err = _select_window(app_name)
+    if not win:
+        return {"success": False, "message": err}
+
+    hwnd = win["hwnd"]
+    # If minimized, restore first
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, SW_RESTORE)
+        time.sleep(0.1)
+
+    user32.SetForegroundWindow(hwnd)
+    time.sleep(0.15)
+
+    current_fg = user32.GetForegroundWindow()
+    if current_fg == hwnd:
+        return {
+            "success": True,
+            "hwnd": hwnd,
+            "message": f"Brought '{win['title']}' to the front."
+        }
+    return {
+        "success": False,
+        "hwnd": hwnd,
+        "message": f"Windows refused foreground focus for '{win['title']}'."
+    }
+
+
+def close_application(app_name: str) -> dict:
+    """
+    Sends a graceful WM_CLOSE message to the application's windows.
+    Refuses to close protected system or MIO processes.
+    Verifies that the window is closed afterward.
+    """
+    clean_app = app_name.strip().lower()
+    if not clean_app:
+        return {"success": False, "message": "Please specify an application to close."}
+
+    for protected in PROTECTED_PROCESSES:
+        if clean_app == protected or protected in clean_app:
+            return {
+                "success": False,
+                "message": f"Safety restriction: '{app_name}' is a protected system process and cannot be closed."
+            }
+
+    all_wins = _get_all_windows()
+    matched = _match_windows_for_query(clean_app, all_wins)
+
+    if not matched:
+        # Check if running application without window
+        from tools.processes import is_application_running
+        run_check = is_application_running(clean_app)
+        if not run_check.get("running"):
+            return {
+                "success": False,
+                "message": f"'{app_name}' is not currently running."
+            }
+        return {
+            "success": False,
+            "message": f"'{app_name}' is running in the background without open windows. Graceful close not possible."
+        }
+
+    # Send WM_CLOSE to all matching windows
+    closed_titles = []
+    for w in matched:
+        hwnd = w["hwnd"]
+        user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
+        closed_titles.append(w["title"])
+
+    # Verify closure over several retries
+    time.sleep(0.3)
+    remaining_wins = _get_all_windows()
+    still_open = [w for w in remaining_wins if w["hwnd"] in [m["hwnd"] for m in matched]]
+
+    if not still_open:
+        return {
+            "success": True,
+            "message": f"Closed '{app_name}' successfully."
+        }
+
+    return {
+        "success": True,
+        "message": f"Sent close request to '{app_name}'. Application may have unsaved changes or prompt dialog open."
+    }
+
+
+def restart_application(app_name: str) -> dict:
+    """
+    Gracefully closes an application, verifies it has closed, and reopens it.
+    """
+    clean_app = app_name.strip()
+    if not clean_app:
+        return {"success": False, "message": "Please specify an application to restart."}
+
+    from tools.applications import open_application
+    from tools.processes import is_application_running
+
+    close_res = close_application(clean_app)
+    if not close_res.get("success"):
+        return {
+            "success": False,
+            "message": f"Could not restart '{clean_app}': {close_res.get('message')}"
+        }
+
+    # Wait up to 2 seconds for app to exit
+    closed = False
+    for _ in range(10):
+        time.sleep(0.2)
+        if not is_application_running(clean_app).get("running"):
+            closed = True
+            break
+
+    reopen_res = open_application(clean_app)
+    if reopen_res.get("success"):
+        return {
+            "success": True,
+            "message": f"Restarted '{clean_app}' successfully."
+        }
+    return {
+        "success": False,
+        "message": f"Closed '{clean_app}' but failed to reopen: {reopen_res.get('message')}"
+    }

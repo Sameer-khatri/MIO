@@ -1064,6 +1064,335 @@ class TestSystemAgent(unittest.TestCase):
         self.assertTrue(should_continue)
         self.assertIsNone(msg)
 
+    # -------------------------------------------------------------------------
+    # Tests for system_info
+    # -------------------------------------------------------------------------
+
+    def test_system_info_cpu_usage(self):
+        from tools.system_info import get_cpu_usage
+        with patch("tools.system_info.ctypes.windll.kernel32.GetSystemTimes", return_value=1):
+            res = get_cpu_usage()
+            self.assertTrue(res["success"])
+            self.assertIn("CPU Usage", res["message"])
+
+        with patch("tools.system_info.ctypes.windll.kernel32.GetSystemTimes", side_effect=RuntimeError("fail")):
+            res = get_cpu_usage()
+            self.assertFalse(res["success"])
+            self.assertIn("Failed", res["message"])
+
+    def test_system_info_ram_usage(self):
+        from tools.system_info import get_ram_usage
+        res = get_ram_usage()
+        self.assertTrue(res["success"])
+        self.assertGreater(res["total_gb"], 0)
+        self.assertIn("RAM Usage", res["message"])
+
+    def test_system_info_disk_space(self):
+        from tools.system_info import get_disk_space
+        res = get_disk_space("C:\\")
+        self.assertTrue(res["success"])
+        self.assertGreater(res["total_gb"], 0)
+
+        with patch("tools.system_info.shutil.disk_usage", side_effect=Exception("Disk error")):
+            err_res = get_disk_space("Z:\\")
+            self.assertFalse(err_res["success"])
+
+    def test_system_info_gpu(self):
+        from tools.system_info import get_gpu_info, get_gpu_usage
+        with patch("tools.system_info.shutil.which", return_value="C:\\nvidia-smi.exe"), \
+             patch("tools.system_info.subprocess.check_output", return_value="GeForce RTX 3050, 4096"):
+            info = get_gpu_info()
+            self.assertTrue(info["success"])
+            self.assertEqual(info["name"], "GeForce RTX 3050")
+
+        with patch("tools.system_info.shutil.which", return_value="C:\\nvidia-smi.exe"), \
+             patch("tools.system_info.subprocess.check_output", return_value="GeForce RTX 3050, 45, 1024, 4096"):
+            usage = get_gpu_usage()
+            self.assertTrue(usage["success"])
+            self.assertEqual(usage["gpu_usage_percent"], 45)
+
+    def test_system_info_aggregate(self):
+        from tools.system_info import get_system_info
+        res = get_system_info()
+        self.assertTrue(res["success"])
+        self.assertIn("OS:", res["message"])
+        self.assertIn("Processor:", res["message"])
+
+    # -------------------------------------------------------------------------
+    # Tests for ports
+    # -------------------------------------------------------------------------
+
+    def test_ports_listening(self):
+        from tools.ports import get_listening_ports
+        fake_netstat = (
+            "  Proto  Local Address          Foreign Address        State           PID\n"
+            "  TCP    0.0.0.0:8080           0.0.0.0:0              LISTENING       1234\n"
+            "  TCP    127.0.0.1:3000         0.0.0.0:0              LISTENING       5678\n"
+        )
+        with patch("tools.ports.subprocess.check_output", return_value=fake_netstat), \
+             patch("tools.ports._get_process_map", return_value={1234: "node.exe", 5678: "app.exe"}):
+            res = get_listening_ports()
+            self.assertTrue(res["success"])
+            self.assertEqual(res["count"], 2)
+            self.assertEqual(res["ports"][0]["port"], 3000)
+            self.assertEqual(res["ports"][1]["port"], 8080)
+
+    def test_ports_what_is_using_port(self):
+        from tools.ports import what_is_using_port
+        with patch("tools.ports.get_listening_ports", return_value={
+            "success": True,
+            "ports": [{"port": 8080, "process_name": "node.exe", "pid": 1234, "protocol": "TCP"}]
+        }):
+            in_use = what_is_using_port(8080)
+            self.assertTrue(in_use["in_use"])
+            self.assertEqual(in_use["process_name"], "node.exe")
+
+            not_in_use = what_is_using_port(9999)
+            self.assertFalse(not_in_use["in_use"])
+
+        invalid = what_is_using_port("abc")
+        self.assertFalse(invalid["success"])
+
+    def test_ports_is_port_free(self):
+        from tools.ports import is_port_free
+        self.assertFalse(is_port_free(-1)["success"])
+        self.assertFalse(is_port_free(999999)["success"])
+
+    # -------------------------------------------------------------------------
+    # Tests for network
+    # -------------------------------------------------------------------------
+
+    def test_network_internet_connectivity(self):
+        from tools.network import is_connected_to_internet
+        with patch("tools.network.socket.socket") as mock_sock:
+            mock_inst = mock_sock.return_value
+            mock_inst.connect.return_value = None
+            res = is_connected_to_internet()
+            self.assertTrue(res["connected"])
+
+        with patch("tools.network.socket.socket") as mock_sock:
+            mock_inst = mock_sock.return_value
+            mock_inst.connect.side_effect = OSError("unreachable")
+            res = is_connected_to_internet()
+            self.assertFalse(res["connected"])
+
+    def test_network_wifi_info(self):
+        from tools.network import get_wifi_info
+        fake_netsh = (
+            "    State                  : connected\n"
+            "    SSID                   : Office_5G\n"
+            "    Signal                 : 85%\n"
+            "    Radio type             : 802.11ax\n"
+        )
+        with patch("tools.network.subprocess.check_output", return_value=fake_netsh):
+            res = get_wifi_info()
+            self.assertTrue(res["connected"])
+            self.assertEqual(res["ssid"], "Office_5G")
+            self.assertEqual(res["signal"], "85%")
+
+    def test_network_ping_safe_and_rejections(self):
+        from tools.network import ping_host
+        # Injection attempts must be rejected
+        self.assertFalse(ping_host("google.com; rm -rf /")["success"])
+        self.assertFalse(ping_host("127.0.0.1 && dir")["success"])
+        self.assertFalse(ping_host("-evil")["success"])
+
+        # Valid ping
+        fake_ping = "Packets: Sent = 2, Received = 2, Lost = 0 (0% loss), Average = 12ms"
+        with patch("tools.network.subprocess.check_output", return_value=fake_ping):
+            res = ping_host("google.com", 2)
+            self.assertTrue(res["success"])
+            self.assertTrue(res["reachable"])
+            self.assertEqual(res["average_ms"], 12)
+
+    # -------------------------------------------------------------------------
+    # Tests for windows
+    # -------------------------------------------------------------------------
+
+    def test_windows_list_and_match(self):
+        from tools.windows import list_windows
+        fake_wins = [
+            {"hwnd": 100, "title": "Untitled - Notepad", "pid": 111, "state": "normal"},
+            {"hwnd": 200, "title": "Google Chrome", "pid": 222, "state": "normal"},
+        ]
+        with patch("tools.windows._get_all_windows", return_value=fake_wins), \
+             patch("tools.windows.get_running_applications", return_value={"success": True, "apps": []}):
+            res = list_windows()
+            self.assertTrue(res["success"])
+            self.assertEqual(res["count"], 2)
+
+            filtered = list_windows("notepad")
+            self.assertTrue(filtered["success"])
+            self.assertEqual(filtered["count"], 1)
+
+    def test_windows_minimize_maximize_restore(self):
+        from tools.windows import minimize_window, maximize_window, restore_window
+        fake_win = {"hwnd": 100, "title": "Test App", "pid": 111, "state": "normal"}
+
+        with patch("tools.windows._select_window", return_value=(fake_win, None)), \
+             patch("tools.windows.user32.ShowWindow"), \
+             patch("tools.windows.user32.IsIconic", return_value=1), \
+             patch("tools.windows.user32.IsZoomed", return_value=0):
+            res = minimize_window("Test App")
+            self.assertTrue(res["success"])
+            self.assertEqual(res["state"], "minimized")
+
+        with patch("tools.windows._select_window", return_value=(fake_win, None)), \
+             patch("tools.windows.user32.ShowWindow"), \
+             patch("tools.windows.user32.IsIconic", return_value=0), \
+             patch("tools.windows.user32.IsZoomed", return_value=1):
+            res = maximize_window("Test App")
+            self.assertTrue(res["success"])
+            self.assertEqual(res["state"], "maximized")
+
+        with patch("tools.windows._select_window", return_value=(fake_win, None)), \
+             patch("tools.windows.user32.ShowWindow"), \
+             patch("tools.windows.user32.IsIconic", return_value=0), \
+             patch("tools.windows.user32.IsZoomed", return_value=0):
+            res = restore_window("Test App")
+            self.assertTrue(res["success"])
+            self.assertEqual(res["state"], "normal")
+
+    def test_windows_close_rejects_protected(self):
+        from tools.windows import close_application
+        for protected in ["explorer", "system", "dwm", "taskmgr", "antigravity"]:
+            res = close_application(protected)
+            self.assertFalse(res["success"])
+            self.assertIn("Safety restriction", res["message"])
+
+    def test_windows_close_and_restart(self):
+        from tools.windows import close_application, restart_application
+        fake_win = {"hwnd": 100, "title": "Notepad", "pid": 111, "state": "normal"}
+
+        with patch("tools.windows._match_windows_for_query", return_value=[fake_win]), \
+             patch("tools.windows.user32.PostMessageW"), \
+             patch("tools.windows._get_all_windows", return_value=[]):
+            res = close_application("notepad")
+            self.assertTrue(res["success"])
+            self.assertIn("Closed 'notepad' successfully", res["message"])
+
+        with patch("tools.windows.close_application", return_value={"success": True}), \
+             patch("tools.windows.is_application_running", return_value={"running": False}), \
+             patch("tools.windows.open_application", return_value={"success": True}):
+            res = restart_application("notepad")
+            self.assertTrue(res["success"])
+            self.assertIn("Restarted 'notepad' successfully", res["message"])
+
+    # -------------------------------------------------------------------------
+    # Tests for delete_file_or_folder
+    # -------------------------------------------------------------------------
+
+    def test_delete_rejects_protected_and_git(self):
+        from tools.filesystem import delete_file_or_folder
+        self.assertFalse(delete_file_or_folder("")["success"])
+        self.assertFalse(delete_file_or_folder("C:\\")["success"])
+
+        with patch("tools.filesystem._resolve_single_source", return_value=(r"C:\Windows\System32", None)):
+            res = delete_file_or_folder("system32")
+            self.assertFalse(res["success"])
+            self.assertIn("Safety restriction", res["message"])
+
+        with patch("tools.filesystem._resolve_single_source", return_value=(r"C:\repo\.git\HEAD", None)):
+            res = delete_file_or_folder(".git")
+            self.assertFalse(res["success"])
+            self.assertIn("git repository", res["message"])
+
+    def test_delete_success(self):
+        from tools.filesystem import delete_file_or_folder
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(b"data")
+            tmp_path = tmp.name
+
+        try:
+            self.assertTrue(os.path.exists(tmp_path))
+            with patch("tools.filesystem._resolve_single_source", return_value=(tmp_path, None)), \
+                 patch("tools.filesystem._recycle_path", return_value=True), \
+                 patch("tools.filesystem.os.path.exists", return_value=False):
+                res = delete_file_or_folder(tmp_path)
+                self.assertTrue(res["success"])
+                self.assertIn("Recycle Bin", res["message"])
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    # -------------------------------------------------------------------------
+    # Tests for agent handle_command routing
+    # -------------------------------------------------------------------------
+
+    def test_handle_command_new_features(self):
+        from agent import handle_command
+
+        with patch("agent.get_system_info", return_value={"message": "System: Windows"}):
+            cont, msg = handle_command("show system info")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "System: Windows")
+
+        with patch("agent.get_cpu_usage", return_value={"message": "CPU: 10%"}):
+            cont, msg = handle_command("show cpu usage")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "CPU: 10%")
+
+        with patch("agent.get_listening_ports", return_value={"message": "Ports: 80"}):
+            cont, msg = handle_command("show listening ports")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Ports: 80")
+
+        with patch("agent.what_is_using_port", return_value={"message": "Port 8080 is used by node"}):
+            cont, msg = handle_command("what is using port 8080")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Port 8080 is used by node")
+
+        with patch("agent.is_port_free", return_value={"message": "Port 3000 is free."}):
+            cont, msg = handle_command("is port 3000 free")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Port 3000 is free.")
+
+        with patch("agent.get_wifi_info", return_value={"message": "Wi-Fi: Connected"}):
+            cont, msg = handle_command("show wifi info")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Wi-Fi: Connected")
+
+        with patch("agent.is_connected_to_internet", return_value={"message": "Yes, connected"}):
+            cont, msg = handle_command("am i connected to internet?")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Yes, connected")
+
+        with patch("agent.ping_host", return_value={"message": "Ping OK"}):
+            cont, msg = handle_command("ping 8.8.8.8")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Ping OK")
+
+        with patch("agent.minimize_window", return_value={"message": "Minimized"}):
+            cont, msg = handle_command("minimize notepad")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Minimized")
+
+        with patch("agent.maximize_window", return_value={"message": "Maximized"}):
+            cont, msg = handle_command("maximize notepad")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Maximized")
+
+        with patch("agent.bring_to_foreground", return_value={"message": "Brought forward"}):
+            cont, msg = handle_command("bring notepad to front")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Brought forward")
+
+        with patch("agent.close_application", return_value={"message": "Closed"}):
+            cont, msg = handle_command("close notepad")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Closed")
+
+        with patch("agent.restart_application", return_value={"message": "Restarted"}):
+            cont, msg = handle_command("restart notepad")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Restarted")
+
+        with patch("agent.delete_file_or_folder", return_value={"message": "Deleted"}):
+            cont, msg = handle_command("delete report.pdf")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Deleted")
+
 
 if __name__ == "__main__":
     unittest.main()
+

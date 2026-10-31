@@ -839,3 +839,121 @@ def locate_executable(query: str) -> dict:
 def locate_executable_in_path(query: str) -> dict:
     """Backward-compatible wrapper; delegates to locate_executable."""
     return locate_executable(query)
+
+
+def _recycle_path(path: str) -> bool:
+    """Executes safe move to Windows Recycle Bin via SHFileOperationW."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class SHFILEOPSTRUCTW(ctypes.Structure):
+            _fields_ = [
+                ("hwnd", wintypes.HWND),
+                ("wFunc", wintypes.UINT),
+                ("pFrom", wintypes.LPCWSTR),
+                ("pTo", wintypes.LPCWSTR),
+                ("fFlags", wintypes.WORD),
+                ("fAnyOperationsAborted", wintypes.BOOL),
+                ("hNameMappings", wintypes.LPVOID),
+                ("lpszProgressTitle", wintypes.LPCWSTR),
+            ]
+
+        op = SHFILEOPSTRUCTW()
+        op.wFunc = 0x0003  # FO_DELETE
+        op.pFrom = path + "\0\0"
+        op.fFlags = 0x0040 | 0x0010 | 0x0004 | 0x0400  # FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI
+
+        ret = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+        return ret == 0
+    except Exception:
+        return False
+
+
+def delete_file_or_folder(source_query: str) -> dict:
+    """
+    Safely moves a target file or folder to the Windows Recycle Bin.
+    Protects Windows system directories, user roots, repo paths, and .git directories.
+    """
+    if not source_query or not isinstance(source_query, str):
+        return {
+            "success": False,
+            "target": "",
+            "message": "Invalid file or folder specified."
+        }
+
+    clean_source = source_query.strip()
+    source_path, error = _resolve_single_source(clean_source)
+    if error:
+        return error
+
+    abs_source = os.path.abspath(source_path)
+    norm_source = os.path.normcase(abs_source)
+
+    # Protected paths check
+    repo_root = os.path.normcase(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
+    user_home = os.path.normcase(os.path.expanduser("~"))
+    win_dir = os.path.normcase(os.environ.get("SystemRoot", "C:\\Windows"))
+    prog_files = os.path.normcase(os.environ.get("ProgramFiles", "C:\\Program Files"))
+    prog_files_x86 = os.path.normcase(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"))
+
+    protected_roots = [user_home, win_dir, prog_files, prog_files_x86, repo_root]
+    # Check if target is a root drive (e.g. C:\)
+    if norm_source.endswith(":\\") or norm_source.endswith(":/") or len(norm_source) <= 3:
+        return {
+            "success": False,
+            "target": abs_source,
+            "message": f"Safety restriction: Cannot delete root drive '{abs_source}'."
+        }
+
+    # User home directory root check (e.g. C:\Users\Username)
+    if norm_source == user_home:
+        return {
+            "success": False,
+            "target": abs_source,
+            "message": f"Safety restriction: Cannot delete user root directory '{abs_source}'."
+        }
+
+    # Protected system & repo subtrees
+    system_subtrees = [win_dir, prog_files, prog_files_x86, repo_root]
+    for p in system_subtrees:
+        if norm_source == p or norm_source.startswith(p + os.sep) or norm_source.startswith(p + "/"):
+            return {
+                "success": False,
+                "target": abs_source,
+                "message": f"Safety restriction: Cannot delete protected system path '{abs_source}'."
+            }
+
+    if ".git" in abs_source.split(os.sep):
+        return {
+            "success": False,
+            "target": abs_source,
+            "message": f"Safety restriction: Cannot delete git repository files in '{abs_source}'."
+        }
+
+    if not _recycle_path(abs_source) or os.path.exists(abs_source):
+        return {
+            "success": False,
+            "target": abs_source,
+            "message": f"Failed to recycle '{os.path.basename(abs_source)}'."
+        }
+
+    # Remove from memory if it was tracked
+    try:
+        from tools.applications import load_memory, forget_memory
+        mem = load_memory()
+        for k, v in mem.items():
+            if os.path.normcase(os.path.abspath(v.get("target", ""))) == norm_source:
+                forget_memory(k)
+                break
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "target": abs_source,
+        "message": f"Sent '{os.path.basename(abs_source)}' to the Recycle Bin."
+    }
+
+
+
