@@ -3,3 +3,21 @@ __pycache__/
 *$py.class
 .pytest_cache/
 agents/system_agent/app_memory.json
+
+# Node & Frontend
+node_modules/
+.vite/
+dist/
+dist-ssr/
+*.local
+
+# Tauri / Rust builds
+src-tauri/target/
+src-tauri/gen/
+**/*.rs.bk
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

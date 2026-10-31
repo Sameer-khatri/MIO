@@ -440,7 +440,8 @@ class TestSystemAgent(unittest.TestCase):
             source_folder = os.path.join(source_root, "PRIMEX")
             os.mkdir(source_folder)
 
-            self.assertTrue(copy_file_or_folder("PRIMEX", destination_root)["success"])
+            self.assertTrue(copy_file_or_folder(source_folder, destination_root)["success"])
+            self.assertTrue(os.path.isdir(os.path.join(destination_root, "PRIMEX")))
             child = os.path.join(source_folder, "child")
             os.mkdir(child)
             with patch("tools.filesystem.find_file_or_folder", return_value={"success": True, "matches": [source_folder]}):
