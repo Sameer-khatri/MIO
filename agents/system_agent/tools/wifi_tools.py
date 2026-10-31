@@ -70,7 +70,6 @@ def get_wifi_password(ssid: str) -> dict:
                 "message": f"Wi-Fi Password for '{clean_ssid}': {password}"
             }
         else:
-            # Could be an open network or profile not found
             if "not found" in output.lower():
                 return {
                     "success": False,
@@ -136,6 +135,59 @@ def scan_wifi_networks() -> dict:
             "networks": [],
             "message": f"Failed to scan Wi-Fi networks: {err}"
         }
+
+
+def connect_to_wifi(ssid: str) -> dict:
+    """
+    Connects to a known saved Wi-Fi network profile.
+    """
+    clean_ssid = ssid.strip()
+    try:
+        output = subprocess.check_output(
+            ["netsh", "wlan", "connect", f"name={clean_ssid}"],
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="ignore"
+        )
+        return {
+            "success": "Connection request was completed" in output or "completed" in output.lower(),
+            "ssid": clean_ssid,
+            "message": f"Connecting to '{clean_ssid}': {output.strip()}"
+        }
+    except Exception as err:
+        return {"success": False, "message": f"Failed to connect to '{clean_ssid}': {err}"}
+
+
+def disconnect_wifi() -> dict:
+    """Disconnects from currently connected Wi-Fi network."""
+    try:
+        output = subprocess.check_output(
+            ["netsh", "wlan", "disconnect"],
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="ignore"
+        )
+        return {"success": True, "message": "Wi-Fi disconnected."}
+    except Exception as err:
+        return {"success": False, "message": f"Failed to disconnect Wi-Fi: {err}"}
+
+
+def delete_wifi_profile(ssid: str) -> dict:
+    """Deletes/forgets a saved Wi-Fi profile."""
+    clean_ssid = ssid.strip()
+    try:
+        output = subprocess.check_output(
+            ["netsh", "wlan", "delete", "profile", f"name={clean_ssid}"],
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="ignore"
+        )
+        return {"success": True, "message": f"Forgot Wi-Fi network '{clean_ssid}'."}
+    except Exception as err:
+        return {"success": False, "message": f"Failed to delete Wi-Fi profile: {err}"}
 
 
 def flush_dns_cache() -> dict:

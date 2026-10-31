@@ -9,6 +9,7 @@ except AttributeError:
     kernel32 = None
 
 _active_timers = {}
+_stopwatches = {}
 
 
 def get_system_uptime() -> dict:
@@ -19,7 +20,6 @@ def get_system_uptime() -> dict:
         return {"success": False, "message": "kernel32 is unavailable."}
 
     try:
-        # GetTickCount64 returns milliseconds since boot
         kernel32.GetTickCount64.restype = ctypes.c_uint64
         uptime_ms = kernel32.GetTickCount64()
         uptime_sec = uptime_ms // 1000
@@ -60,7 +60,6 @@ def get_system_uptime() -> dict:
 def _timer_worker(seconds: int, label: str):
     time.sleep(seconds)
     _active_timers.pop(label, None)
-    # Lazy import to keep tools decoupled
     try:
         from tools.notifications import show_notification
         show_notification(f"Timer Alert: {label}", f"Your timer for {seconds} seconds has completed!", with_chime=True)
@@ -112,4 +111,60 @@ def list_active_timers() -> dict:
         "count": len(active),
         "timers": active,
         "message": f"{len(active)} active timer(s): {', '.join(active) if active else 'None'}"
+    }
+
+
+def start_stopwatch(name: str = "default") -> dict:
+    """
+    Starts a precision stopwatch.
+    """
+    clean_name = name.strip().lower()
+    _stopwatches[clean_name] = {
+        "start": time.perf_counter(),
+        "laps": [],
+        "created_at": datetime.datetime.now().strftime("%I:%M:%S %p")
+    }
+    return {
+        "success": True,
+        "name": clean_name,
+        "message": f"Stopwatch '{clean_name}' started at {_stopwatches[clean_name]['created_at']}."
+    }
+
+
+def lap_stopwatch(name: str = "default") -> dict:
+    """
+    Records a lap timestamp on a running stopwatch.
+    """
+    clean_name = name.strip().lower()
+    sw = _stopwatches.get(clean_name)
+    if not sw:
+        return {"success": False, "message": f"Stopwatch '{clean_name}' is not running."}
+
+    elapsed = round(time.perf_counter() - sw["start"], 2)
+    sw["laps"].append(elapsed)
+    return {
+        "success": True,
+        "lap_number": len(sw["laps"]),
+        "elapsed_seconds": elapsed,
+        "message": f"Lap {len(sw['laps'])} for '{clean_name}': {elapsed}s"
+    }
+
+
+def stop_stopwatch(name: str = "default") -> dict:
+    """
+    Stops a stopwatch and returns total elapsed time.
+    """
+    clean_name = name.strip().lower()
+    sw = _stopwatches.pop(clean_name, None)
+    if not sw:
+        return {"success": False, "message": f"Stopwatch '{clean_name}' is not running."}
+
+    elapsed = round(time.perf_counter() - sw["start"], 2)
+    return {
+        "success": True,
+        "name": clean_name,
+        "elapsed_seconds": elapsed,
+        "total_seconds": elapsed,
+        "total_laps": len(sw["laps"]),
+        "message": f"Stopwatch '{clean_name}' stopped: {elapsed} seconds ({len(sw['laps'])} laps)."
     }

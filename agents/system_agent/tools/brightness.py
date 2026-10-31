@@ -1,5 +1,5 @@
 import subprocess
-import re
+import time
 
 
 def get_brightness() -> dict:
@@ -87,3 +87,28 @@ def decrease_brightness(delta: int = 10) -> dict:
         return curr
     current_val = curr.get("brightness", 50)
     return set_brightness(current_val - delta)
+
+
+def fade_brightness(target_percent: int, steps: int = 5) -> dict:
+    """
+    Smoothly fades the screen brightness towards the target level.
+    """
+    curr = get_brightness()
+    if not curr.get("success"):
+        return curr
+
+    start = curr.get("brightness", 50)
+    target = max(0, min(100, int(target_percent)))
+    step_count = max(2, int(steps))
+
+    for i in range(1, step_count + 1):
+        interpolated = int(start + (target - start) * (i / step_count))
+        set_brightness(interpolated)
+        time.sleep(0.04)
+
+    return {
+        "success": True,
+        "from": start,
+        "to": target,
+        "message": f"Smoothly transitioned brightness from {start}% to {target}%."
+    }

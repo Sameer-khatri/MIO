@@ -372,3 +372,83 @@ def restart_application(app_name: str) -> dict:
         "success": False,
         "message": f"Closed '{clean_app}' but failed to reopen: {reopen_res.get('message')}"
     }
+
+
+def move_and_resize_window(app_name: str, x: int, y: int, width: int, height: int) -> dict:
+    """
+    Moves and resizes the target application window to exact pixel bounds.
+    """
+    win, err = _select_window(app_name)
+    if not win:
+        return {"success": False, "message": err or f"No active window found for '{app_name}'."}
+
+    hwnd = win["hwnd"]
+    try:
+        user32.ShowWindow(hwnd, SW_RESTORE)
+        ret = user32.MoveWindow(hwnd, int(x), int(y), int(width), int(height), True)
+        if ret:
+            return {
+                "success": True,
+                "app": app_name,
+                "bounds": {"x": x, "y": y, "width": width, "height": height},
+                "message": f"Moved and resized '{app_name}' to ({x}, {y}, {width}x{height})."
+            }
+        return {"success": False, "message": f"Failed to reposition window for '{app_name}'."}
+    except Exception as err:
+        return {"success": False, "message": f"Error moving window: {err}"}
+
+
+def snap_window(app_name: str, side: str = "left") -> dict:
+    """
+    Snaps window to the left half or right half of the primary monitor screen.
+    side: 'left' or 'right'.
+    """
+    screen_w = user32.GetSystemMetrics(0)
+    screen_h = user32.GetSystemMetrics(1)
+    half_w = screen_w // 2
+
+    norm_side = side.strip().lower()
+    if norm_side == "right":
+        x, y, w, h = half_w, 0, half_w, screen_h
+    else:
+        x, y, w, h = 0, 0, half_w, screen_h
+
+    res = move_and_resize_window(app_name, x, y, w, h)
+    if res.get("success"):
+        return {
+            "success": True,
+            "app": app_name,
+            "side": norm_side,
+            "message": f"Snapped '{app_name}' to the {norm_side.upper()} half of screen."
+        }
+    return res
+
+
+def set_always_on_top(app_name: str, enabled: bool = True) -> dict:
+    """
+    Pins a window Always-on-Top (floating above other windows) or unpins it.
+    """
+    win, err = _select_window(app_name)
+    if not win:
+        return {"success": False, "message": err or f"No active window found for '{app_name}'."}
+
+    hwnd = win["hwnd"]
+    HWND_TOPMOST = -1
+    HWND_NOTOPMOST = -2
+    SWP_NOMOVE = 0x0002
+    SWP_NOSIZE = 0x0001
+    SWP_SHOWWINDOW = 0x0040
+
+    flag = HWND_TOPMOST if enabled else HWND_NOTOPMOST
+    try:
+        user32.SetWindowPos(hwnd, flag, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
+        state_str = "Pinned Always-on-Top" if enabled else "Unpinned from Always-on-Top"
+        return {
+            "success": True,
+            "app": app_name,
+            "always_on_top": enabled,
+            "message": f"'{app_name}' is now {state_str}."
+        }
+    except Exception as err:
+        return {"success": False, "message": f"Failed to set always-on-top: {err}"}
+

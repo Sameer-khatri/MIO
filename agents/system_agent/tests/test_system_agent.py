@@ -2165,6 +2165,435 @@ class TestSystemAgent(unittest.TestCase):
             self.assertTrue(cont)
             self.assertEqual(msg, "USB drives list")
 
+    # =========================================================================
+    # Tests for Master Capacity Expansions across All 25 Tools
+    # =========================================================================
+
+    def test_display_expanded(self):
+        from tools.display import get_monitors_detail, get_display_modes
+        res_monitors = get_monitors_detail()
+        self.assertTrue(res_monitors["success"])
+        self.assertIn("count", res_monitors)
+
+        res_modes = get_display_modes()
+        self.assertTrue(res_modes["success"])
+        self.assertIn("refresh_rate_hz", res_modes)
+
+    def test_browser_expanded(self):
+        from tools.browser import open_with_browser, open_multiple_urls, get_default_browser
+        with patch("tools.browser.webbrowser.get") as mock_get:
+            mock_inst = MagicMock()
+            mock_get.return_value = mock_inst
+            res = open_with_browser("https://github.com", "chrome")
+            self.assertTrue(res["success"])
+            self.assertIn("chrome", res["browser"])
+
+        with patch("tools.browser.webbrowser.open", return_value=True):
+            res_multi = open_multiple_urls(["https://google.com", "https://bing.com"])
+            self.assertTrue(res_multi["success"])
+            self.assertEqual(res_multi["opened_count"], 2)
+
+        def_browser = get_default_browser()
+        self.assertTrue(def_browser["success"])
+        self.assertIn("browser", def_browser)
+
+    def test_audio_expanded(self):
+        from tools.audio import speak_text, list_audio_devices
+        with patch("tools.audio.subprocess.Popen") as mock_popen:
+            res = speak_text("Hello from MIO")
+            self.assertTrue(res["success"])
+            self.assertEqual(res["text"], "Hello from MIO")
+
+        with patch("tools.audio.subprocess.check_output", return_value='[{"Name":"Realtek Audio","Status":"OK"}]'):
+            res_devs = list_audio_devices()
+            self.assertTrue(res_devs["success"])
+            self.assertEqual(res_devs["count"], 1)
+
+    def test_mouse_expanded(self):
+        from tools.mouse import drag_to, mouse_down, mouse_up, move_relative
+        with patch("tools.mouse.user32.mouse_event"):
+            res_down = mouse_down("left")
+            self.assertTrue(res_down["success"])
+            res_up = mouse_up("left")
+            self.assertTrue(res_up["success"])
+
+        with patch("tools.mouse.get_cursor_position", return_value={"success": True, "x": 100, "y": 100}), \
+             patch("tools.mouse.move_cursor", return_value={"success": True, "x": 200, "y": 200}), \
+             patch("tools.mouse.user32.SetCursorPos", return_value=1), \
+             patch("tools.mouse.mouse_down", return_value={"success": True}), \
+             patch("tools.mouse.mouse_up", return_value={"success": True}):
+            res_drag = drag_to(200, 200, steps=2)
+            self.assertTrue(res_drag["success"])
+
+            res_rel = move_relative(50, 50)
+            self.assertTrue(res_rel["success"])
+
+    def test_input_expanded(self):
+        from tools.input import (
+            open_file_explorer,
+            open_windows_settings,
+            open_run_dialog,
+            close_active_window,
+            select_all,
+            copy_selection,
+            paste_selection,
+        )
+        with patch("tools.input.send_hotkey", return_value={"success": True, "message": "OK"}):
+            self.assertTrue(open_file_explorer()["success"])
+            self.assertTrue(open_windows_settings()["success"])
+            self.assertTrue(open_run_dialog()["success"])
+            self.assertTrue(close_active_window()["success"])
+            self.assertTrue(select_all()["success"])
+            self.assertTrue(copy_selection()["success"])
+            self.assertTrue(paste_selection()["success"])
+
+    def test_clipboard_expanded(self):
+        from tools.clipboard import append_clipboard_text, get_clipboard_formats
+        with patch("tools.clipboard.get_clipboard_text", return_value={"success": True, "text": "Part 1"}), \
+             patch("tools.clipboard.set_clipboard_text", return_value={"success": True, "message": "OK"}):
+            res_app = append_clipboard_text(" - Part 2")
+            self.assertTrue(res_app["success"])
+
+        with patch("tools.clipboard.user32.OpenClipboard", return_value=True), \
+             patch("tools.clipboard.user32.CloseClipboard", return_value=True), \
+             patch("tools.clipboard.user32.EnumClipboardFormats", side_effect=[13, 0]):
+            res_fmts = get_clipboard_formats()
+            self.assertTrue(res_fmts["success"])
+            self.assertEqual(res_fmts["format_count"], 1)
+
+    def test_screen_expanded(self):
+        from tools.screen import take_region_screenshot, get_image_dimensions
+        with patch("tools.screen.subprocess.check_output", return_value=b""), \
+             patch("tools.screen.os.path.exists", return_value=True), \
+             patch("tools.screen.os.path.getsize", return_value=5000):
+            res_reg = take_region_screenshot(0, 0, 800, 600, "region.png")
+            self.assertTrue(res_reg["success"])
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
+            tf_path = tf.name
+            # Minimal PNG header and IHDR chunk (width=320, height=240)
+            png_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x01\x40\x00\x00\x00\xf0\x08\x06\x00\x00\x00"
+            tf.write(png_bytes)
+        try:
+            dims = get_image_dimensions(tf_path)
+            self.assertTrue(dims["success"])
+            self.assertEqual(dims["width"], 320)
+            self.assertEqual(dims["height"], 240)
+        finally:
+            if os.path.exists(tf_path):
+                os.remove(tf_path)
+
+    def test_notifications_expanded(self):
+        from tools.notifications import beep, play_sound_pattern
+        with patch("tools.notifications.winsound.Beep"):
+            self.assertTrue(beep(1000, 100)["success"])
+            self.assertTrue(play_sound_pattern("success")["success"])
+            self.assertTrue(play_sound_pattern("error")["success"])
+            self.assertTrue(play_sound_pattern("alert")["success"])
+            self.assertFalse(play_sound_pattern("nonexistent")["success"])
+
+    def test_settings_expanded(self):
+        from tools.settings import get_wallpaper, set_wallpaper, set_transparency_effects
+        with patch("tools.settings.user32.SystemParametersInfoW", return_value=1):
+            res_get = get_wallpaper()
+            self.assertTrue(res_get["success"])
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tf:
+            wall_path = tf.name
+        try:
+            with patch("tools.settings.user32.SystemParametersInfoW", return_value=1):
+                res_set = set_wallpaper(wall_path)
+                self.assertTrue(res_set["success"])
+        finally:
+            if os.path.exists(wall_path):
+                os.remove(wall_path)
+
+        with patch("tools.settings.winreg.OpenKey"), \
+             patch("tools.settings.winreg.SetValueEx"):
+            res_trans = set_transparency_effects(True)
+            self.assertTrue(res_trans["success"])
+
+    def test_power_expanded(self):
+        from tools.power import (
+            sleep_system,
+            hibernate_system,
+            schedule_shutdown,
+            schedule_restart,
+            cancel_shutdown,
+            get_active_power_plan,
+        )
+        with patch("tools.power.ctypes.windll.powrprof.SetSuspendState", return_value=1):
+            self.assertTrue(sleep_system()["success"])
+            self.assertTrue(hibernate_system()["success"])
+
+        with patch("tools.power.subprocess.check_output", return_value=b""):
+            self.assertTrue(schedule_shutdown(60)["success"])
+            self.assertTrue(schedule_restart(60)["success"])
+            self.assertTrue(cancel_shutdown()["success"])
+
+        with patch("tools.power.subprocess.check_output", return_value="Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)"):
+            plan_res = get_active_power_plan()
+            self.assertTrue(plan_res["success"])
+            self.assertEqual(plan_res["plan"], "Balanced")
+
+    def test_brightness_expanded(self):
+        from tools.brightness import fade_brightness
+        with patch("tools.brightness.get_brightness", return_value={"success": True, "brightness": 20}), \
+             patch("tools.brightness.set_brightness", return_value={"success": True, "brightness": 60}):
+            res_fade = fade_brightness(60, steps=2)
+            self.assertTrue(res_fade["success"])
+
+    def test_services_expanded(self):
+        from tools.services import set_service_startup, get_service_description
+        with patch("tools.services.subprocess.check_output", return_value="[SC] ChangeServiceConfig SUCCESS"):
+            res_start = set_service_startup("Spooler", "auto")
+            self.assertTrue(res_start["success"])
+
+        with patch("tools.services.subprocess.check_output", return_value="SERVICE_NAME: Spooler\nDESCRIPTION: Print Spooler Service"):
+            res_desc = get_service_description("Spooler")
+            self.assertTrue(res_desc["success"])
+            self.assertIn("Print Spooler", res_desc["description"])
+
+    def test_drives_expanded(self):
+        from tools.drives import check_drive_space_warning, eject_usb_drive
+        with patch("tools.drives.list_drives", return_value={
+            "success": True,
+            "drives": [{"device": "C:\\", "used_percent": 95, "free_gb": 5, "total_gb": 100}]
+        }):
+            res_warn = check_drive_space_warning(threshold_percent=90)
+            self.assertTrue(res_warn["success"])
+            self.assertTrue(res_warn["has_warnings"])
+
+        with patch("tools.drives.subprocess.check_output", return_value="Ejected"):
+            res_ej = eject_usb_drive("E")
+            self.assertTrue(res_ej["success"])
+
+    def test_wifi_expanded(self):
+        from tools.wifi_tools import connect_to_wifi, disconnect_wifi, delete_wifi_profile
+        with patch("tools.wifi_tools.subprocess.check_output", return_value="Connection request was completed successfully."):
+            res_conn = connect_to_wifi("HomeWifi")
+            self.assertTrue(res_conn["success"])
+
+        with patch("tools.wifi_tools.subprocess.check_output", return_value="Disconnected"):
+            res_disc = disconnect_wifi()
+            self.assertTrue(res_disc["success"])
+
+        with patch("tools.wifi_tools.subprocess.check_output", return_value="Profile 'OldWifi' is deleted from interface."):
+            res_del = delete_wifi_profile("OldWifi")
+            self.assertTrue(res_del["success"])
+
+    def test_network_expanded(self):
+        from tools.network import get_public_ip
+        with patch("tools.network.urllib.request.urlopen") as mock_open:
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = b'{"ip": "203.0.113.195"}'
+            mock_resp.__enter__.return_value = mock_resp
+            mock_open.return_value = mock_resp
+            res_ip = get_public_ip()
+            self.assertTrue(res_ip["success"])
+            self.assertEqual(res_ip["public_ip"], "203.0.113.195")
+
+    def test_ports_expanded(self):
+        from tools.ports import kill_port_process, scan_remote_port
+        with patch("tools.ports.what_is_using_port", return_value={
+            "success": True, "in_use": True, "pid": 4321, "process_name": "server.exe"
+        }), patch("tools.ports.subprocess.check_output", return_value="SUCCESS"):
+            res_kill = kill_port_process(3000)
+            self.assertTrue(res_kill["success"])
+
+        with patch("tools.ports.socket.socket") as mock_sock:
+            mock_inst = MagicMock()
+            mock_inst.connect_ex.return_value = 0
+            mock_sock.return_value = mock_inst
+            res_scan = scan_remote_port("example.com", 443)
+            self.assertTrue(res_scan["success"])
+            self.assertTrue(res_scan["is_open"])
+
+    def test_system_info_expanded(self):
+        from tools.system_info import get_cpu_details, get_motherboard_info
+        with patch("tools.system_info.subprocess.check_output", return_value='[{"Name":"Intel Core i9","NumberOfCores":16,"NumberOfLogicalProcessors":24,"MaxClockSpeed":5800}]'):
+            res_cpu = get_cpu_details()
+            self.assertTrue(res_cpu["success"])
+            self.assertEqual(res_cpu["cores"], 16)
+
+        with patch("tools.system_info.subprocess.check_output", return_value='[{"Manufacturer":"ASUS","Product":"ROG MAXIMUS","SerialNumber":"12345"}]'):
+            res_mb = get_motherboard_info()
+            self.assertTrue(res_mb["success"])
+            self.assertEqual(res_mb["motherboard"]["Manufacturer"], "ASUS")
+
+    def test_hasher_expanded(self):
+        import hashlib
+        from tools.hasher import hash_text, compare_files
+        res_hash = hash_text("Hello World", "sha256")
+        self.assertTrue(res_hash["success"])
+        self.assertEqual(res_hash["hash"], hashlib.sha256(b"Hello World").hexdigest())
+
+        with tempfile.NamedTemporaryFile(delete=False) as f1, tempfile.NamedTemporaryFile(delete=False) as f2:
+            f1.write(b"Same Content")
+            f1.close()
+            f2.write(b"Same Content")
+            f2.close()
+            try:
+                comp = compare_files(f1.name, f2.name)
+                self.assertTrue(comp["success"])
+                self.assertTrue(comp["identical"])
+            finally:
+                if os.path.exists(f1.name):
+                    os.remove(f1.name)
+                if os.path.exists(f2.name):
+                    os.remove(f2.name)
+
+    def test_archive_expanded(self):
+        from tools.archive import create_tar, test_archive
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src_file = os.path.join(tmpdir, "sample.txt")
+            with open(src_file, "w") as f:
+                f.write("Archive test data")
+
+            tar_dst = os.path.join(tmpdir, "archive.tar.gz")
+            res_tar = create_tar(src_file, tar_dst, gzip=True)
+            self.assertTrue(res_tar["success"])
+            self.assertTrue(os.path.exists(tar_dst))
+
+            res_test = test_archive(tar_dst)
+            self.assertTrue(res_test["success"])
+            self.assertTrue(res_test["valid"])
+
+    def test_installed_apps_expanded(self):
+        from tools.installed_apps import get_app_uninstall_command
+        with patch("tools.installed_apps.list_installed_software", return_value={
+            "success": True,
+            "apps": [{"name": "Sample App", "uninstall_string": "MsiExec.exe /X{12345}"}]
+        }):
+            res_cmd = get_app_uninstall_command("Sample App")
+            self.assertTrue(res_cmd["success"])
+            self.assertIn("MsiExec.exe", res_cmd["uninstall_string"])
+
+    def test_processes_expanded(self):
+        from tools.processes import kill_process, get_top_processes
+        with patch("tools.processes.subprocess.check_output", return_value="SUCCESS: The process has been terminated."):
+            res_kill = kill_process("notepad.exe")
+            self.assertTrue(res_kill["success"])
+
+        fake_tasklist = '"node.exe","1000","Console","1","50,000 K"\r\n"chrome.exe","2000","Console","1","100,000 K"\r\n'
+        with patch("tools.processes.subprocess.check_output", return_value=fake_tasklist):
+            res_top = get_top_processes(2)
+            self.assertTrue(res_top["success"])
+            self.assertEqual(len(res_top["top_processes"]), 2)
+
+    def test_windows_expanded(self):
+        from tools.windows import move_and_resize_window, snap_window, set_always_on_top
+        fake_wins = [{"hwnd": 999, "title": "Test Window", "pid": 111, "state": "normal"}]
+        with patch("tools.windows._get_all_windows", return_value=fake_wins), \
+             patch("tools.windows.user32.MoveWindow", return_value=1), \
+             patch("tools.windows.user32.SetWindowPos", return_value=1):
+            res_mv = move_and_resize_window("Test Window", 10, 10, 800, 600)
+            self.assertTrue(res_mv["success"])
+
+            with patch("tools.windows.user32.GetSystemMetrics", side_effect=[1920, 1080]):
+                res_snap = snap_window("Test Window", "left")
+                self.assertTrue(res_snap["success"])
+
+            res_top = set_always_on_top("Test Window", True)
+            self.assertTrue(res_top["success"])
+
+    def test_filesystem_expanded(self):
+        from tools.filesystem import read_file_head, read_file_tail, get_folder_size
+        with tempfile.NamedTemporaryFile("w+", delete=False) as tf:
+            tf.write("line 1\nline 2\nline 3\nline 4\nline 5\n")
+            tf_path = tf.name
+        try:
+            res_head = read_file_head(tf_path, 2)
+            self.assertTrue(res_head["success"])
+            self.assertEqual(res_head["line_count"], 2)
+
+            res_tail = read_file_tail(tf_path, 2)
+            self.assertTrue(res_tail["success"])
+            self.assertEqual(res_tail["line_count"], 2)
+
+            res_size = get_folder_size(os.path.dirname(tf_path))
+            self.assertTrue(res_size["success"])
+            self.assertIn("total_bytes", res_size)
+        finally:
+            if os.path.exists(tf_path):
+                os.remove(tf_path)
+
+    def test_timer_expanded(self):
+        from tools.timer import start_stopwatch, lap_stopwatch, stop_stopwatch
+        res_start = start_stopwatch("task_timer")
+        self.assertTrue(res_start["success"])
+
+        res_lap = lap_stopwatch("task_timer")
+        self.assertTrue(res_lap["success"])
+
+        res_stop = stop_stopwatch("task_timer")
+        self.assertTrue(res_stop["success"])
+        self.assertIn("elapsed_seconds", res_stop)
+
+    def test_applications_expanded(self):
+        from tools.applications import open_application_as_admin, open_file_with_default_app
+        with patch("tools.applications.ctypes.windll.shell32.ShellExecuteW", return_value=42), \
+             patch("tools.filesystem.locate_executable", return_value={"success": True, "matches": ["C:\\Windows\\notepad.exe"]}):
+            res_admin = open_application_as_admin("notepad")
+            self.assertTrue(res_admin["success"])
+
+        with patch("tools.applications.os.path.exists", return_value=True), \
+             patch("tools.applications.os.startfile"):
+            res_file = open_file_with_default_app("C:\\file.txt")
+            self.assertTrue(res_file["success"])
+
+    def test_agent_command_dispatch_expanded(self):
+        from agent import handle_command
+        with patch("agent.get_cpu_details", return_value={"message": "CPU details 16 cores"}):
+            cont, msg = handle_command("cpu details")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "CPU details 16 cores")
+
+        with patch("agent.get_motherboard_info", return_value={"message": "ASUS Motherboard"}):
+            cont, msg = handle_command("motherboard info")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "ASUS Motherboard")
+
+        with patch("agent.kill_port_process", return_value={"message": "Port 3000 freed"}):
+            cont, msg = handle_command("kill port 3000")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Port 3000 freed")
+
+        with patch("agent.get_public_ip", return_value={"message": "Public IP: 1.2.3.4"}):
+            cont, msg = handle_command("public ip")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Public IP: 1.2.3.4")
+
+        with patch("agent.snap_window", return_value={"message": "Snapped left"}):
+            cont, msg = handle_command("snap left notepad")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Snapped left")
+
+        with patch("agent.set_always_on_top", return_value={"message": "Pinned on top"}):
+            cont, msg = handle_command("pin on top notepad")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Pinned on top")
+
+        with patch("agent.get_top_processes", return_value={"message": "Top processes list"}):
+            cont, msg = handle_command("top processes")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Top processes list")
+
+        with patch("agent.kill_process", return_value={"message": "Process killed"}):
+            cont, msg = handle_command("kill process notepad")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Process killed")
+
+        with patch("agent.open_application_as_admin", return_value={"message": "Opened as admin"}):
+            cont, msg = handle_command("run as admin powershell")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Opened as admin")
+
+        with patch("agent.open_file_with_default_app", return_value={"message": "Opened file"}):
+            cont, msg = handle_command("open file doc.pdf")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Opened file")
+
 
 if __name__ == "__main__":
     unittest.main()

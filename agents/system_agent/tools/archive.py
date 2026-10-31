@@ -1,4 +1,5 @@
 import os
+import tarfile
 import zipfile
 
 
@@ -25,7 +26,6 @@ def create_zip(source_path: str, zip_path: str = None) -> dict:
             base, _ = os.path.splitext(norm_source)
             norm_zip = base + ".zip"
 
-    # Avoid zipping the archive into itself if placing in same folder
     target_dir = os.path.dirname(norm_zip)
     if target_dir and not os.path.exists(target_dir):
         os.makedirs(target_dir, exist_ok=True)
@@ -88,7 +88,6 @@ def extract_zip(zip_path: str, destination_folder: str = None) -> dict:
             dest_prefix = os.path.commonpath([norm_dest])
 
             for member in zf.infolist():
-                # Prevent directory traversal attacks
                 target_path = os.path.abspath(os.path.join(norm_dest, member.filename))
                 if os.path.commonpath([norm_dest, target_path]) != dest_prefix:
                     raise ValueError(f"Zip contains unsafe path attempting directory traversal: {member.filename}")
@@ -151,3 +150,71 @@ def list_zip_contents(zip_path: str) -> dict:
             "zip_path": norm_zip,
             "message": f"Failed to inspect zip: {err}"
         }
+
+
+def create_tar(source_path: str, tar_path: str = None, gzip_compress: bool = True, gzip: bool = None) -> dict:
+    """
+    Compresses files or directories into .tar.gz or .tar format using standard library tarfile.
+    """
+    if gzip is not None:
+        gzip_compress = gzip
+
+    if not source_path or not isinstance(source_path, str):
+        return {"success": False, "message": "Source path is required."}
+
+    norm_source = os.path.abspath(os.path.expanduser(source_path.strip()))
+    if not os.path.exists(norm_source):
+        return {"success": False, "message": f"Source does not exist: {norm_source}"}
+
+    ext = ".tar.gz" if gzip_compress else ".tar"
+    mode = "w:gz" if gzip_compress else "w"
+
+    if tar_path and tar_path.strip():
+        norm_tar = os.path.abspath(os.path.expanduser(tar_path.strip()))
+    else:
+        norm_tar = norm_source.rstrip("\\/") + ext
+
+    os.makedirs(os.path.dirname(norm_tar), exist_ok=True)
+
+    try:
+        with tarfile.open(norm_tar, mode) as tar:
+            arcname = os.path.basename(norm_source)
+            tar.add(norm_source, arcname=arcname)
+
+        size_bytes = os.path.getsize(norm_tar)
+        return {
+            "success": True,
+            "tar_path": norm_tar,
+            "size_bytes": size_bytes,
+            "message": f"Created tar archive '{norm_tar}' ({size_bytes} bytes)."
+        }
+    except Exception as err:
+        return {"success": False, "message": f"Failed to create tar: {err}"}
+
+
+def test_archive(archive_path: str) -> dict:
+    """
+    Verifies the integrity of a .zip or .tar archive without extracting to disk.
+    """
+    norm_path = os.path.abspath(os.path.expanduser(archive_path.strip()))
+    if not os.path.exists(norm_path):
+        return {"success": False, "message": f"Archive not found: {norm_path}"}
+
+    if zipfile.is_zipfile(norm_path):
+        try:
+            with zipfile.ZipFile(norm_path, "r") as zf:
+                bad_file = zf.testzip()
+                if bad_file:
+                    return {"success": False, "valid": False, "corrupt_file": bad_file, "message": f"Corrupt file in zip: {bad_file}"}
+                return {"success": True, "valid": True, "type": "ZIP", "message": f"Zip archive '{os.path.basename(norm_path)}' is healthy (integrity verified)."}
+        except Exception as err:
+            return {"success": False, "valid": False, "message": f"Zip verification error: {err}"}
+    elif tarfile.is_tarfile(norm_path):
+        try:
+            with tarfile.open(norm_path, "r:*") as tar:
+                members = tar.getmembers()
+                return {"success": True, "valid": True, "type": "TAR", "items": len(members), "message": f"Tar archive '{os.path.basename(norm_path)}' is healthy ({len(members)} items)."}
+        except Exception as err:
+            return {"success": False, "valid": False, "message": f"Tar verification error: {err}"}
+
+    return {"success": False, "message": "Unsupported archive format (must be .zip or .tar)."}

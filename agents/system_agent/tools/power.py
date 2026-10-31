@@ -1,5 +1,5 @@
 import ctypes
-import os
+import re
 import subprocess
 from ctypes import wintypes
 
@@ -9,6 +9,11 @@ try:
 except AttributeError:
     user32 = None
     kernel32 = None
+
+HWND_BROADCAST = 0xFFFF
+WM_SYSCOMMAND = 0x0112
+SC_MONITORPOWER = 0xF170
+MONITOR_OFF = 2
 
 
 class SYSTEM_POWER_STATUS(ctypes.Structure):
@@ -23,78 +28,134 @@ class SYSTEM_POWER_STATUS(ctypes.Structure):
 
 
 def lock_workstation() -> dict:
-    """Immediately locks the Windows user session."""
+    """Locks the current Windows user session immediately."""
     if not user32:
         return {"success": False, "message": "user32 is unavailable."}
 
     ret = user32.LockWorkStation()
     if ret:
-        return {
-            "success": True,
-            "message": "Windows workstation locked successfully."
-        }
-    return {
-        "success": False,
-        "message": "Failed to lock workstation."
-    }
+        return {"success": True, "message": "Workstation locked successfully."}
+    return {"success": False, "message": "Failed to lock workstation."}
 
 
 def turn_off_screen() -> dict:
-    """Puts the display/monitors into low-power sleep mode."""
+    """Puts the display monitors to sleep power-saving mode."""
     if not user32:
         return {"success": False, "message": "user32 is unavailable."}
 
-    HWND_BROADCAST = 0xFFFF
-    WM_SYSCOMMAND = 0x0112
-    SC_MONITORPOWER = 0xF170
-    MONITOR_OFF = 2
-
     user32.SendMessageW(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, MONITOR_OFF)
-    return {
-        "success": True,
-        "message": "Turned off display (moving mouse or typing will wake it)."
-    }
+    return {"success": True, "message": "Display turned off (monitor sleeping)."}
+
+
+def sleep_system() -> dict:
+    """Puts the computer to Sleep (standby)."""
+    try:
+        powrprof = ctypes.windll.powrprof
+        powrprof.SetSuspendState(0, 1, 0)
+        return {"success": True, "message": "System put into sleep mode."}
+    except Exception as err:
+        return {"success": False, "message": f"Failed to sleep system: {err}"}
+
+
+def hibernate_system() -> dict:
+    """Puts the computer into Hibernation."""
+    try:
+        powrprof = ctypes.windll.powrprof
+        powrprof.SetSuspendState(1, 1, 0)
+        return {"success": True, "message": "System put into hibernation."}
+    except Exception as err:
+        return {"success": False, "message": f"Failed to hibernate: {err}"}
+
+
+def schedule_shutdown(seconds: int = 60) -> dict:
+    """Schedules a system shutdown after N seconds."""
+    sec = max(0, int(seconds))
+    try:
+        subprocess.check_output(["shutdown.exe", "/s", "/t", str(sec)], stderr=subprocess.STDOUT)
+        return {"success": True, "seconds": sec, "message": f"Shutdown scheduled in {sec} second(s)."}
+    except Exception as err:
+        return {"success": False, "message": f"Failed to schedule shutdown: {err}"}
+
+
+def schedule_restart(seconds: int = 60) -> dict:
+    """Schedules a system restart after N seconds."""
+    sec = max(0, int(seconds))
+    try:
+        subprocess.check_output(["shutdown.exe", "/r", "/t", str(sec)], stderr=subprocess.STDOUT)
+        return {"success": True, "seconds": sec, "message": f"Restart scheduled in {sec} second(s)."}
+    except Exception as err:
+        return {"success": False, "message": f"Failed to schedule restart: {err}"}
+
+
+def cancel_shutdown() -> dict:
+    """Cancels any pending scheduled shutdown or restart."""
+    try:
+        subprocess.check_output(["shutdown.exe", "/a"], stderr=subprocess.STDOUT)
+        return {"success": True, "message": "Pending scheduled shutdown/restart has been cancelled."}
+    except Exception as err:
+        return {"success": False, "message": f"Failed to cancel shutdown: {err}"}
+
+
+def get_active_power_plan() -> dict:
+    """Retrieves the active Windows power plan scheme (Balanced, High Performance, Silent, etc.)."""
+    try:
+        output = subprocess.check_output(
+            ["powercfg", "/getactivescheme"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="ignore"
+        ).strip()
+
+        match = re.search(r"\((.*?)\)", output)
+        plan_name = match.group(1) if match else output
+        return {
+            "success": True,
+            "plan": plan_name,
+            "raw": output,
+            "message": f"Active Power Plan: {plan_name}"
+        }
+    except Exception as err:
+        return {"success": False, "message": f"Could not retrieve active power plan: {err}"}
 
 
 def get_battery_status() -> dict:
-    """Reads live hardware power status (AC power, battery percentage, charging state)."""
+    """Reads system battery percentage, charging state, and estimated remaining run time."""
     if not kernel32:
         return {"success": False, "message": "kernel32 is unavailable."}
 
     sps = SYSTEM_POWER_STATUS()
     if not kernel32.GetSystemPowerStatus(ctypes.byref(sps)):
-        return {"success": False, "message": "Failed to query system power status."}
+        return {"success": False, "message": "Failed to read system power status."}
 
-    # AC Line Status: 0 = Offline (Battery), 1 = Online (Plugged in), 255 = Unknown
-    ac_connected = sps.ACLineStatus == 1
-    ac_label = "Plugged In" if ac_connected else ("On Battery" if sps.ACLineStatus == 0 else "Unknown")
-
-    # BatteryFlag: 8 = Charging, 128 = No system battery (Desktop PC)
-    has_battery = not bool(sps.BatteryFlag & 128)
+    percent = sps.BatteryLifePercent
+    is_ac = (sps.ACLineStatus == 1)
     is_charging = bool(sps.BatteryFlag & 8)
+    no_battery = (sps.BatteryFlag == 128)
 
-    pct = int(sps.BatteryLifePercent)
-    if pct == 255 or not has_battery:
-        battery_pct = None
-        batt_str = "No battery detected (Desktop)"
-    else:
-        battery_pct = pct
-        batt_str = f"{pct}% {'(Charging)' if is_charging else ''}".strip()
+    if no_battery or percent == 255:
+        return {
+            "success": True,
+            "has_battery": False,
+            "ac_connected": is_ac,
+            "message": "Desktop system: Running on AC power (No battery detected)."
+        }
 
-    remaining_sec = sps.BatteryLifeTime if sps.BatteryLifeTime != 0xFFFFFFFF else None
-    remaining_min = round(remaining_sec / 60) if remaining_sec else None
+    status_str = "Plugged in, charging" if (is_ac and is_charging) else ("Plugged in, not charging" if is_ac else "On battery power")
 
-    lines = [f"Power Source: {ac_label}", f"Battery: {batt_str}"]
-    if remaining_min:
-        lines.append(f"Estimated Time Remaining: {remaining_min} minutes")
+    time_remaining_min = None
+    if sps.BatteryLifeTime != 0xFFFFFFFF and sps.BatteryLifeTime > 0:
+        time_remaining_min = sps.BatteryLifeTime // 60
 
+    time_str = f" (~{time_remaining_min} mins remaining)" if time_remaining_min else ""
+
+    power_src_str = "AC Adapter" if is_ac else "Battery"
     return {
         "success": True,
-        "ac_connected": ac_connected,
-        "power_source": ac_label,
-        "has_battery": has_battery,
-        "battery_percent": battery_pct,
-        "is_charging": is_charging,
-        "remaining_minutes": remaining_min,
-        "message": "\n".join(lines)
+        "has_battery": True,
+        "percent": percent,
+        "charging": is_charging,
+        "ac_connected": is_ac,
+        "time_remaining_minutes": time_remaining_min,
+        "message": f"Power Source: {power_src_str}. Battery: {percent}% ({status_str}){time_str}."
     }

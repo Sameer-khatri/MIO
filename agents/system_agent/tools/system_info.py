@@ -1,278 +1,316 @@
 import ctypes
+import json
 import os
 import platform
 import shutil
 import subprocess
 import time
+from ctypes import wintypes
 
 try:
-    from ctypes import wintypes
-except ImportError:
-    wintypes = None
+    kernel32 = ctypes.windll.kernel32
+except AttributeError:
+    kernel32 = None
 
-
-class MEMORYSTATUSEX(ctypes.Structure):
-    _fields_ = [
-        ("dwLength", ctypes.c_ulong),
-        ("dwMemoryLoad", ctypes.c_ulong),
-        ("ullTotalPhys", ctypes.c_ulonglong),
-        ("ullAvailPhys", ctypes.c_ulonglong),
-        ("ullTotalPageFile", ctypes.c_ulonglong),
-        ("ullAvailPageFile", ctypes.c_ulonglong),
-        ("ullTotalVirtual", ctypes.c_ulonglong),
-        ("ullAvailVirtual", ctypes.c_ulonglong),
-        ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
-    ]
+_last_idle_time = 0
+_last_kernel_time = 0
+_last_user_time = 0
+_last_sample_timestamp = 0.0
 
 
 class FILETIME(ctypes.Structure):
     _fields_ = [
-        ("dwLowDateTime", ctypes.c_uint),
-        ("dwHighDateTime", ctypes.c_uint),
+        ("dwLowDateTime", wintypes.DWORD),
+        ("dwHighDateTime", wintypes.DWORD),
+    ]
+
+    def to_uint64(self) -> int:
+        return (self.dwHighDateTime << 32) | self.dwLowDateTime
+
+
+class MEMORYSTATUSEX(ctypes.Structure):
+    _fields_ = [
+        ("dwLength", wintypes.DWORD),
+        ("dwMemoryLoad", wintypes.DWORD),
+        ("ullTotalPhys", ctypes.c_uint64),
+        ("ullAvailPhys", ctypes.c_uint64),
+        ("ullTotalPageFile", ctypes.c_uint64),
+        ("ullAvailPageFile", ctypes.c_uint64),
+        ("ullTotalVirtual", ctypes.c_uint64),
+        ("ullAvailVirtual", ctypes.c_uint64),
+        ("ullAvailExtendedVirtual", ctypes.c_uint64),
     ]
 
 
-def _filetime_to_int(ft: FILETIME) -> int:
-    return (ft.dwHighDateTime << 32) + ft.dwLowDateTime
-
-
 def get_cpu_usage() -> dict:
-    """Reads current system-wide CPU usage percentage."""
+    """Calculates instantaneous CPU usage percentage using GetSystemTimes."""
+    global _last_idle_time, _last_kernel_time, _last_user_time, _last_sample_timestamp
+
+    if not kernel32:
+        return {"success": False, "cpu_usage_percent": 0.0, "message": "kernel32 is unavailable."}
+
+    idle_ft = FILETIME()
+    kernel_ft = FILETIME()
+    user_ft = FILETIME()
+
     try:
-        kernel32 = ctypes.windll.kernel32
-        idle1, kernel1, user1 = FILETIME(), FILETIME(), FILETIME()
-        if not kernel32.GetSystemTimes(ctypes.byref(idle1), ctypes.byref(kernel1), ctypes.byref(user1)):
-            raise RuntimeError("GetSystemTimes call failed.")
+        if not kernel32.GetSystemTimes(ctypes.byref(idle_ft), ctypes.byref(kernel_ft), ctypes.byref(user_ft)):
+            return {"success": False, "cpu_usage_percent": 0.0, "message": "Failed to read system times."}
 
-        time.sleep(0.1)
+        curr_idle = idle_ft.to_uint64()
+        curr_kernel = kernel_ft.to_uint64()
+        curr_user = user_ft.to_uint64()
+        curr_ts = time.time()
 
-        idle2, kernel2, user2 = FILETIME(), FILETIME(), FILETIME()
-        if not kernel32.GetSystemTimes(ctypes.byref(idle2), ctypes.byref(kernel2), ctypes.byref(user2)):
-            raise RuntimeError("GetSystemTimes call failed.")
+        if _last_sample_timestamp == 0.0 or (curr_ts - _last_sample_timestamp) > 10.0:
+            time.sleep(0.08)
+            kernel32.GetSystemTimes(ctypes.byref(idle_ft), ctypes.byref(kernel_ft), ctypes.byref(user_ft))
+            t1_idle, t1_kernel, t1_user = idle_ft.to_uint64(), kernel_ft.to_uint64(), user_ft.to_uint64()
 
-        idle = _filetime_to_int(idle2) - _filetime_to_int(idle1)
-        kernel = _filetime_to_int(kernel2) - _filetime_to_int(kernel1)
-        user = _filetime_to_int(user2) - _filetime_to_int(user1)
-        total = kernel + user
+            delta_idle = t1_idle - curr_idle
+            delta_kernel = t1_kernel - curr_kernel
+            delta_user = t1_user - curr_user
 
-        if total <= 0:
-            pct = 0.0
+            _last_idle_time = t1_idle
+            _last_kernel_time = t1_kernel
+            _last_user_time = t1_user
+            _last_sample_timestamp = time.time()
         else:
-            pct = round(((total - idle) / total) * 100.0, 1)
-            pct = max(0.0, min(100.0, pct))
+            delta_idle = curr_idle - _last_idle_time
+            delta_kernel = curr_kernel - _last_kernel_time
+            delta_user = curr_user - _last_user_time
 
+            _last_idle_time = curr_idle
+            _last_kernel_time = curr_kernel
+            _last_user_time = curr_user
+            _last_sample_timestamp = curr_ts
+
+        total_system = delta_kernel + delta_user
+        if total_system <= 0:
+            cpu_percent = 0.0
+        else:
+            cpu_percent = round(((total_system - delta_idle) / total_system) * 100.0, 1)
+
+        cpu_percent = max(0.0, min(100.0, cpu_percent))
         return {
             "success": True,
-            "cpu_usage_percent": pct,
-            "message": f"CPU Usage: {pct}%"
+            "cpu_usage_percent": cpu_percent,
+            "message": f"CPU Usage: {cpu_percent}%"
         }
     except Exception as err:
+        return {"success": False, "cpu_usage_percent": 0.0, "message": f"Failed to compute CPU usage: {err}"}
+
+
+def get_cpu_details() -> dict:
+    """Retrieves processor model name, core counts, and clock speed via WMI."""
+    ps_cmd = "Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed | ConvertTo-Json"
+    try:
+        output = subprocess.check_output(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="ignore"
+        ).strip()
+        data = json.loads(output)
+        if isinstance(data, list):
+            data = data[0]
         return {
-            "success": False,
-            "cpu_usage_percent": 0.0,
-            "message": f"Failed to retrieve CPU usage: {err}"
+            "success": True,
+            "name": data.get("Name", "").strip(),
+            "cores": data.get("NumberOfCores"),
+            "physical_cores": data.get("NumberOfCores"),
+            "threads": data.get("NumberOfLogicalProcessors"),
+            "logical_processors": data.get("NumberOfLogicalProcessors"),
+            "max_clock_mhz": data.get("MaxClockSpeed"),
+            "message": f"{data.get('Name', '').strip()} ({data.get('NumberOfCores')} Cores, {data.get('NumberOfLogicalProcessors')} Threads)"
         }
+    except Exception as err:
+        return {"success": False, "message": f"Could not read CPU details: {err}"}
 
 
 def get_ram_usage() -> dict:
-    """Reads total, used, and available physical RAM."""
-    try:
-        stat = MEMORYSTATUSEX()
-        stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
-        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
-            raise RuntimeError("GlobalMemoryStatusEx call failed.")
+    """Reads system physical memory (RAM) statistics."""
+    if not kernel32:
+        return {"success": False, "message": "kernel32 is unavailable."}
 
-        total_gb = round(stat.ullTotalPhys / (1024 ** 3), 2)
-        avail_gb = round(stat.ullAvailPhys / (1024 ** 3), 2)
-        used_gb = round(total_gb - avail_gb, 2)
-        load_pct = int(stat.dwMemoryLoad)
+    stat = MEMORYSTATUSEX()
+    stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
 
-        return {
-            "success": True,
-            "total_gb": total_gb,
-            "used_gb": used_gb,
-            "available_gb": avail_gb,
-            "usage_percent": load_pct,
-            "message": f"RAM Usage: {used_gb} GB / {total_gb} GB ({load_pct}%)"
-        }
-    except Exception as err:
-        return {
-            "success": False,
-            "total_gb": 0.0,
-            "used_gb": 0.0,
-            "available_gb": 0.0,
-            "usage_percent": 0,
-            "message": f"Failed to retrieve RAM usage: {err}"
-        }
+    if not kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+        return {"success": False, "message": "GlobalMemoryStatusEx call failed."}
+
+    total_gb = round(stat.ullTotalPhys / (1024 ** 3), 2)
+    avail_gb = round(stat.ullAvailPhys / (1024 ** 3), 2)
+    used_gb = round(total_gb - avail_gb, 2)
+    load_pct = stat.dwMemoryLoad
+
+    return {
+        "success": True,
+        "load_percent": load_pct,
+        "total_gb": total_gb,
+        "used_gb": used_gb,
+        "available_gb": avail_gb,
+        "message": f"RAM Usage: {load_pct}% used ({used_gb} GB / {total_gb} GB, {avail_gb} GB available)"
+    }
 
 
 def get_disk_space(path: str = "C:\\") -> dict:
-    """Reads disk space information for the target drive or directory."""
+    """Checks disk space usage for a given drive root path."""
     try:
-        clean_path = path.strip() if path else "C:\\"
-        if len(clean_path) == 1 and clean_path.isalpha():
-            clean_path = f"{clean_path.upper()}:\\"
-
-        usage = shutil.disk_usage(clean_path)
-        total_gb = round(usage.total / (1024 ** 3), 1)
-        used_gb = round(usage.used / (1024 ** 3), 1)
-        free_gb = round(usage.free / (1024 ** 3), 1)
-        pct = round((usage.used / usage.total) * 100, 1) if usage.total > 0 else 0.0
+        total, used, free = shutil.disk_usage(path)
+        total_gb = round(total / (1024 ** 3), 2)
+        used_gb = round(used / (1024 ** 3), 2)
+        free_gb = round(free / (1024 ** 3), 2)
+        used_pct = round((used / total) * 100.0, 1)
 
         return {
             "success": True,
-            "drive": clean_path,
+            "path": path,
             "total_gb": total_gb,
             "used_gb": used_gb,
             "free_gb": free_gb,
-            "usage_percent": pct,
-            "message": f"Disk ({clean_path}): {used_gb} GB used / {total_gb} GB total ({free_gb} GB free, {pct}% used)"
+            "used_percent": used_pct,
+            "message": f"Disk ({path}): {used_pct}% used ({used_gb} GB / {total_gb} GB, {free_gb} GB free)"
         }
     except Exception as err:
-        return {
-            "success": False,
-            "drive": path,
-            "total_gb": 0.0,
-            "used_gb": 0.0,
-            "free_gb": 0.0,
-            "usage_percent": 0.0,
-            "message": f"Failed to read disk space for '{path}': {err}"
-        }
+        return {"success": False, "path": path, "message": f"Failed to inspect disk '{path}': {err}"}
 
 
 def get_gpu_info() -> dict:
-    """Reads installed GPU model name and total video memory."""
-    # 1. Try nvidia-smi if present
-    if shutil.which("nvidia-smi"):
+    """Reads GPU information using nvidia-smi or Windows WMI."""
+    nvsmi = shutil.which("nvidia-smi")
+    if nvsmi:
         try:
             out = subprocess.check_output(
-                ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
-                text=True,
+                [nvsmi, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
                 stderr=subprocess.DEVNULL,
-                timeout=5
+                text=True
             ).strip()
             if out:
-                parts = [p.strip() for p in out.split(",")]
-                name = parts[0]
-                total_mb = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-                total_gb = round(total_mb / 1024, 2)
+                first = out.splitlines()[0]
+                parts = [p.strip() for p in first.split(",")]
+                gpu_name = parts[0]
+                mem_mb = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+                mem_gb = round(mem_mb / 1024.0, 2) if mem_mb else None
                 return {
                     "success": True,
-                    "name": name,
-                    "memory_total_gb": total_gb,
-                    "vendor": "NVIDIA",
-                    "message": f"GPU: {name} ({total_gb} GB VRAM)" if total_gb > 0 else f"GPU: {name}"
+                    "name": gpu_name,
+                    "memory_total_gb": mem_gb,
+                    "driver": "NVIDIA",
+                    "message": f"GPU: {gpu_name}" + (f" ({mem_gb} GB VRAM)" if mem_gb else "")
                 }
         except Exception:
             pass
 
-    # 2. Fallback to PowerShell Win32_VideoController
+    ps_cmd = "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"
     try:
-        ps_cmd = "(Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name) -join ', '"
-        out = subprocess.check_output(
+        output = subprocess.check_output(
             ["powershell", "-NoProfile", "-Command", ps_cmd],
-            text=True,
             stderr=subprocess.DEVNULL,
-            timeout=5
+            text=True
         ).strip()
-        if out:
+        names = [line.strip() for line in output.splitlines() if line.strip()]
+        if names:
+            gpu_str = ", ".join(names)
             return {
                 "success": True,
-                "name": out,
-                "memory_total_gb": 0.0,
-                "vendor": "Unknown",
-                "message": f"GPU: {out}"
+                "name": gpu_str,
+                "driver": "Windows WMI",
+                "message": f"GPU(s): {gpu_str}"
             }
     except Exception:
         pass
 
-    return {
-        "success": False,
-        "name": "",
-        "memory_total_gb": 0.0,
-        "vendor": "Unknown",
-        "message": "No GPU information found."
-    }
+    return {"success": False, "name": "Unknown", "message": "No GPU detected or query unavailable."}
 
 
 def get_gpu_usage() -> dict:
-    """Reads GPU utilization percentage and VRAM usage."""
-    if shutil.which("nvidia-smi"):
+    """Reads instantaneous GPU utilization and VRAM usage."""
+    nvsmi = shutil.which("nvidia-smi")
+    if nvsmi:
         try:
             out = subprocess.check_output(
-                ["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
-                text=True,
+                [nvsmi, "--query-gpu=name,utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
                 stderr=subprocess.DEVNULL,
-                timeout=5
+                text=True
             ).strip()
             if out:
-                parts = [p.strip() for p in out.split(",")]
+                parts = [p.strip() for p in out.splitlines()[0].split(",")]
                 name = parts[0]
-                gpu_util = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-                mem_used = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
-                mem_total = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
-                used_gb = round(mem_used / 1024, 2)
-                total_gb = round(mem_total / 1024, 2)
+                util_pct = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+                used_mb = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+                total_mb = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
 
                 return {
                     "success": True,
                     "name": name,
-                    "gpu_usage_percent": gpu_util,
-                    "memory_used_gb": used_gb,
-                    "memory_total_gb": total_gb,
-                    "message": f"GPU Usage ({name}): {gpu_util}% | VRAM: {used_gb} GB / {total_gb} GB"
+                    "gpu_usage_percent": util_pct,
+                    "vram_used_mb": used_mb,
+                    "vram_total_mb": total_mb,
+                    "message": f"GPU ({name}): {util_pct}% load | VRAM: {used_mb}MB / {total_mb}MB"
                 }
-        except Exception as err:
-            return {
-                "success": False,
-                "gpu_usage_percent": 0,
-                "message": f"Failed to read GPU usage: {err}"
-            }
+        except Exception:
+            pass
+    return {"success": False, "message": "Instantaneous GPU utilization is only available for NVIDIA GPUs via nvidia-smi."}
 
-    # If no nvidia-smi, check general GPU availability
-    info = get_gpu_info()
-    if info.get("success"):
+
+def get_motherboard_info() -> dict:
+    """Retrieves Motherboard manufacturer, model, and BIOS info via WMI."""
+    ps_cmd = (
+        "$b = Get-CimInstance Win32_BaseBoard | Select-Object Manufacturer, Product; "
+        "$bios = Get-CimInstance Win32_BIOS | Select-Object SMBIOSBIOSVersion, ReleaseDate; "
+        "@{ Manufacturer=$b.Manufacturer; Product=$b.Product; BiosVersion=$bios.SMBIOSBIOSVersion } | ConvertTo-Json"
+    )
+    try:
+        output = subprocess.check_output(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="ignore"
+        ).strip()
+        data = json.loads(output)
+        if isinstance(data, list):
+            data = data[0] if data else {}
         return {
             "success": True,
-            "name": info.get("name"),
-            "gpu_usage_percent": 0,
-            "message": f"GPU: {info.get('name')} (live utilization metrics require NVIDIA drivers)"
+            "motherboard": data,
+            "manufacturer": data.get("Manufacturer", "").strip(),
+            "product": data.get("Product", "").strip(),
+            "bios_version": data.get("BiosVersion", "").strip(),
+            "message": f"Motherboard: {data.get('Manufacturer', '')} {data.get('Product', '')} (BIOS: {data.get('BiosVersion', '')})"
         }
-
-    return {
-        "success": False,
-        "gpu_usage_percent": 0,
-        "message": "GPU utilization monitor unavailable."
-    }
+    except Exception as err:
+        return {"success": False, "message": f"Could not query motherboard info: {err}"}
 
 
 def get_system_info() -> dict:
-    """Aggregates comprehensive system facts (OS, CPU, RAM, Disk, GPU)."""
+    """Aggregates an executive summary of the entire computer hardware and OS."""
+    os_name = f"{platform.system()} {platform.release()} ({platform.version()})"
+    proc_name = platform.processor() or "Unknown CPU"
+
     cpu_res = get_cpu_usage()
     ram_res = get_ram_usage()
     disk_res = get_disk_space("C:\\")
     gpu_res = get_gpu_info()
 
-    os_info = f"{platform.system()} {platform.release()} (Build {platform.version()})"
-    cpu_model = platform.processor() or "Unknown CPU"
-
     lines = [
-        f"OS: {os_info}",
-        f"Processor: {cpu_model}",
-        f"CPU Load: {cpu_res.get('cpu_usage_percent', 0)}%",
-        f"RAM: {ram_res.get('used_gb', 0)} GB / {ram_res.get('total_gb', 0)} GB ({ram_res.get('usage_percent', 0)}%)",
-        f"Disk (C:): {disk_res.get('used_gb', 0)} GB / {disk_res.get('total_gb', 0)} GB ({disk_res.get('free_gb', 0)} GB free)",
+        f"OS: {os_name}",
+        f"Processor: {proc_name}",
+        f"CPU Load: {cpu_res.get('cpu_usage_percent', 0.0)}%",
+        f"RAM: {ram_res.get('load_percent', 0)}% used ({ram_res.get('used_gb', 0)} GB / {ram_res.get('total_gb', 0)} GB)",
+        f"Disk (C:): {disk_res.get('used_percent', 0)}% used ({disk_res.get('free_gb', 0)} GB free)",
+        f"Graphics: {gpu_res.get('message', 'None')}"
     ]
-    if gpu_res.get("success"):
-        lines.append(f"GPU: {gpu_res.get('name')}")
 
     return {
         "success": True,
-        "os": os_info,
-        "processor": cpu_model,
+        "os": os_name,
+        "processor": proc_name,
         "cpu": cpu_res,
         "ram": ram_res,
         "disk": disk_res,
         "gpu": gpu_res,
-        "message": "\n".join(lines)
+        "message": "System Specifications:\n" + "\n".join(f"- {l}" for l in lines)
     }

@@ -1,5 +1,6 @@
 import os
 import subprocess
+import time
 import winsound
 
 
@@ -32,6 +33,59 @@ def play_chime(sound_type: str = "asterisk") -> dict:
             "sound": sound_type,
             "message": f"Failed to play chime: {err}"
         }
+
+
+def beep(frequency_hz: int = 1000, duration_ms: int = 250) -> dict:
+    """
+    Plays a hardware speaker tone at the exact specified frequency and duration.
+    """
+    try:
+        freq = max(37, min(32767, int(frequency_hz)))
+        dur = max(10, min(5000, int(duration_ms)))
+        winsound.Beep(freq, dur)
+        return {
+            "success": True,
+            "frequency_hz": freq,
+            "duration_ms": dur,
+            "message": f"Played beep tone: {freq} Hz for {dur} ms."
+        }
+    except Exception as err:
+        return {"success": False, "message": f"Failed to play beep: {err}"}
+
+
+def play_sound_pattern(pattern_name: str = "success") -> dict:
+    """
+    Plays composed audio patterns for clear user feedback:
+    'success' (ascending chord), 'error' (descending alert), 'alarm' (triple pulse).
+    """
+    p_norm = pattern_name.strip().lower()
+    try:
+        if p_norm == "success":
+            for f in (523, 659, 784):  # C5, E5, G5 major triad
+                winsound.Beep(f, 80)
+                time.sleep(0.01)
+        elif p_norm == "error":
+            for f in (440, 349):  # A4, F4
+                winsound.Beep(f, 150)
+                time.sleep(0.02)
+        elif p_norm in ("alarm", "alert"):
+            for _ in range(3):
+                winsound.Beep(1200, 90)
+                time.sleep(0.05)
+        else:
+            return {
+                "success": False,
+                "pattern": p_norm,
+                "message": f"Unknown sound pattern: '{pattern_name}'. Supported patterns: 'success', 'error', 'alarm', 'alert'."
+            }
+
+        return {
+            "success": True,
+            "pattern": p_norm,
+            "message": f"Played '{p_norm}' sound sequence."
+        }
+    except Exception as err:
+        return {"success": False, "pattern": p_norm, "message": f"Could not play sound pattern: {err}"}
 
 
 def show_notification(title: str, message: str, with_chime: bool = True) -> dict:

@@ -38,11 +38,9 @@ def list_installed_software(query: str = "") -> dict:
                             if not norm_name or norm_name in seen_names:
                                 continue
 
-                            # Filter if query provided
                             if clean_q and clean_q not in norm_name.lower():
                                 continue
 
-                            # Try retrieving additional metadata
                             def get_field(k, field_name):
                                 try:
                                     val, _ = winreg.QueryValueEx(k, field_name)
@@ -54,6 +52,7 @@ def list_installed_software(query: str = "") -> dict:
                             publisher = get_field(app_key, "Publisher")
                             install_date = get_field(app_key, "InstallDate")
                             install_location = get_field(app_key, "InstallLocation")
+                            uninstall_str = get_field(app_key, "UninstallString")
 
                             seen_names.add(norm_name)
                             installed.append({
@@ -61,7 +60,8 @@ def list_installed_software(query: str = "") -> dict:
                                 "version": version or "Unknown",
                                 "publisher": publisher or "Unknown",
                                 "install_date": install_date or "Unknown",
-                                "location": install_location or ""
+                                "location": install_location or "",
+                                "uninstall_command": uninstall_str or ""
                             })
                     except Exception:
                         continue
@@ -99,7 +99,6 @@ def get_app_version(app_name: str) -> dict:
             "message": f"Application '{app_name}' not found in installed software."
         }
 
-    # Best match: exact match if exists, or first match
     clean_target = app_name.strip().lower()
     exact = next((a for a in apps if a["name"].lower() == clean_target), apps[0])
 
@@ -108,5 +107,32 @@ def get_app_version(app_name: str) -> dict:
         "name": exact["name"],
         "version": exact["version"],
         "publisher": exact["publisher"],
+        "location": exact.get("location", ""),
         "message": f"{exact['name']} Version: {exact['version']} ({exact['publisher']})"
     }
+
+
+list_installed_applications = list_installed_software
+get_installed_apps = list_installed_software
+
+
+def get_app_uninstall_command(app_name: str) -> dict:
+    """
+    Retrieves the registered uninstallation command line for an installed application.
+    """
+    res = list_installed_software(app_name)
+    apps = res.get("apps", [])
+    if not apps:
+        return {"success": False, "message": f"Application '{app_name}' not found."}
+
+    exact = apps[0]
+    uninst = exact.get("uninstall_command") or exact.get("uninstall_string", "")
+    if uninst:
+        return {
+            "success": True,
+            "name": exact["name"],
+            "uninstall_command": uninst,
+            "uninstall_string": uninst,
+            "message": f"Uninstall Command for {exact['name']}: {uninst}"
+        }
+    return {"success": False, "message": f"No uninstall command registered for {exact['name']}."}

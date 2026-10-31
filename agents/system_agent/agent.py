@@ -14,8 +14,17 @@ sys_agent_dir = os.path.dirname(os.path.abspath(__file__))
 if sys_agent_dir not in sys.path:
     sys.path.insert(0, sys_agent_dir)
 
-from tools.applications import open_application
-from tools.processes import get_running_applications, is_application_running
+from tools.applications import (
+    open_application,
+    open_application_as_admin,
+    open_file_with_default_app,
+)
+from tools.processes import (
+    get_running_applications,
+    is_application_running,
+    kill_process,
+    get_top_processes,
+)
 from tools.filesystem import (
     list_files,
     find_file_or_folder,
@@ -25,6 +34,9 @@ from tools.filesystem import (
     rename_file_or_folder,
     delete_file_or_folder,
     locate_executable,
+    read_file_head,
+    read_file_tail,
+    get_folder_size,
 )
 from tools.windows import (
     list_windows,
@@ -34,23 +46,29 @@ from tools.windows import (
     bring_to_foreground,
     close_application,
     restart_application,
+    snap_window,
+    set_always_on_top,
 )
 from tools.system_info import (
     get_system_info,
     get_cpu_usage,
+    get_cpu_details,
     get_ram_usage,
     get_disk_space,
     get_gpu_info,
     get_gpu_usage,
+    get_motherboard_info,
 )
 from tools.ports import (
     get_listening_ports,
     what_is_using_port,
     is_port_free,
+    kill_port_process,
 )
 from tools.network import (
     get_network_info,
     get_ip_address,
+    get_public_ip,
     get_wifi_info,
     is_connected_to_internet,
     ping_host,
@@ -64,39 +82,59 @@ from tools.audio import (
     media_next,
     media_prev,
     media_stop,
+    speak_text,
+    list_audio_devices,
 )
 from tools.clipboard import (
     get_clipboard_text,
     set_clipboard_text,
+    append_clipboard_text,
     clear_clipboard,
+    get_clipboard_formats,
 )
 from tools.input import (
     show_desktop,
     open_task_manager,
     switch_app_alt_tab,
+    open_file_explorer,
+    open_windows_settings,
+    open_run_dialog,
+    close_active_window,
     send_hotkey,
     type_text,
 )
 from tools.power import (
     lock_workstation,
     turn_off_screen,
+    sleep_system,
+    hibernate_system,
+    schedule_shutdown,
+    cancel_shutdown,
+    get_active_power_plan,
     get_battery_status,
 )
 from tools.screen import (
     take_screenshot,
+    take_region_screenshot,
 )
 from tools.notifications import (
     play_chime,
+    beep,
+    play_sound_pattern,
     show_notification,
 )
 from tools.browser import (
     open_url,
     search_web,
     open_incognito,
+    open_with_browser,
+    get_default_browser,
 )
 from tools.mouse import (
     get_cursor_position,
     move_cursor,
+    move_relative,
+    drag_to,
     click,
     right_click,
     double_click,
@@ -106,27 +144,38 @@ from tools.archive import (
     create_zip,
     extract_zip,
     list_zip_contents,
+    create_tar,
+    test_archive,
 )
 from tools.settings import (
     get_theme_mode,
     set_theme_mode,
     get_accent_color,
+    get_wallpaper,
+    set_wallpaper,
+    set_transparency_effects,
 )
 from tools.timer import (
     get_system_uptime,
     start_timer,
     list_active_timers,
+    start_stopwatch,
+    lap_stopwatch,
+    stop_stopwatch,
 )
 from tools.brightness import (
     get_brightness,
     set_brightness,
     increase_brightness,
     decrease_brightness,
+    fade_brightness,
 )
 from tools.wifi_tools import (
     get_saved_wifi_profiles,
     get_wifi_password,
     scan_wifi_networks,
+    connect_to_wifi,
+    disconnect_wifi,
     flush_dns_cache,
 )
 from tools.services import (
@@ -135,22 +184,32 @@ from tools.services import (
     start_service,
     stop_service,
     restart_service,
+    set_service_startup,
+    get_service_description,
 )
 from tools.installed_apps import (
     list_installed_software,
     get_app_version,
+    get_app_uninstall_command,
 )
 from tools.hasher import (
     hash_file,
+    hash_text,
     verify_checksum,
+    compare_files,
 )
 from tools.display import (
     get_display_info,
+    get_monitors_detail,
+    get_display_modes,
 )
 from tools.drives import (
     list_drives,
     get_removable_drives,
+    check_drive_space_warning,
+    eject_usb_drive,
 )
+
 
 
 
@@ -277,6 +336,13 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         return True, result.get("message", "Failed to inspect running applications.")
 
     # 5. Media & Audio Hands
+    if lower_input.startswith("speak "):
+        txt = cleaned[6:].strip()
+        res = speak_text(txt)
+        return True, res.get("message")
+    if lower_input in ("show audio devices", "list audio devices", "audio devices"):
+        res = list_audio_devices()
+        return True, res.get("message")
     if lower_input in ("mute", "unmute", "toggle mute"):
         res = toggle_mute()
         return True, res.get("message")
@@ -310,6 +376,13 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     if lower_input == "clear clipboard":
         res = clear_clipboard()
         return True, res.get("message")
+    if lower_input in ("clipboard formats", "show clipboard formats"):
+        res = get_clipboard_formats()
+        return True, res.get("message")
+    if lower_input.startswith("append to clipboard "):
+        app_txt = cleaned[20:].strip()
+        res = append_clipboard_text(app_txt)
+        return True, res.get("message")
     if lower_input.startswith("copy to clipboard "):
         text_to_copy = cleaned[18:].strip()
         res = set_clipboard_text(text_to_copy)
@@ -329,6 +402,18 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     if lower_input in ("switch app", "alt tab", "switch application"):
         res = switch_app_alt_tab()
         return True, res.get("message")
+    if lower_input in ("open explorer", "open file explorer", "file explorer"):
+        res = open_file_explorer()
+        return True, res.get("message")
+    if lower_input in ("open settings", "windows settings"):
+        res = open_windows_settings()
+        return True, res.get("message")
+    if lower_input in ("open run", "run dialog"):
+        res = open_run_dialog()
+        return True, res.get("message")
+    if lower_input in ("close window", "close active window"):
+        res = close_active_window()
+        return True, res.get("message")
     if lower_input.startswith("type "):
         text_to_type = cleaned[5:]
         res = type_text(text_to_type)
@@ -346,9 +431,29 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     if lower_input in ("turn off screen", "turn off monitor", "sleep monitor", "screen off"):
         res = turn_off_screen()
         return True, res.get("message")
+    if lower_input in ("sleep", "sleep pc", "sleep system"):
+        res = sleep_system()
+        return True, res.get("message")
+    if lower_input in ("hibernate", "hibernate pc"):
+        res = hibernate_system()
+        return True, res.get("message")
+    if lower_input in ("power plan", "active power plan", "show power plan"):
+        res = get_active_power_plan()
+        return True, res.get("message")
+    if lower_input.startswith("schedule shutdown "):
+        sec_str = cleaned[18:].strip()
+        try:
+            res = schedule_shutdown(int(sec_str))
+            return True, res.get("message")
+        except ValueError:
+            return True, "Please specify seconds for shutdown. Example: 'schedule shutdown 60'"
+    if lower_input in ("cancel shutdown", "abort shutdown"):
+        res = cancel_shutdown()
+        return True, res.get("message")
     if lower_input in ("show battery", "battery status", "battery", "power status", "show power"):
         res = get_battery_status()
         return True, res.get("message")
+
 
     # 9. Screen Capture Hands
     if lower_input in ("take screenshot", "screenshot", "capture screen"):
@@ -374,6 +479,25 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         return True, res.get("message")
 
     # 11. Browser & Web Search Hands
+    if lower_input in ("show default browser", "default browser", "what is my default browser"):
+        res = get_default_browser()
+        return True, res.get("message")
+    if lower_input.startswith("open with chrome "):
+        target_url = cleaned[17:].strip()
+        res = open_with_browser(target_url, "chrome")
+        return True, res.get("message")
+    if lower_input.startswith("open with edge "):
+        target_url = cleaned[15:].strip()
+        res = open_with_browser(target_url, "edge")
+        return True, res.get("message")
+    if lower_input.startswith("open with brave "):
+        target_url = cleaned[16:].strip()
+        res = open_with_browser(target_url, "brave")
+        return True, res.get("message")
+    if lower_input.startswith("open with firefox "):
+        target_url = cleaned[18:].strip()
+        res = open_with_browser(target_url, "firefox")
+        return True, res.get("message")
     if lower_input.startswith("open url ") or lower_input.startswith("browse "):
         target_url = re.sub(r"^(open url|browse)\s+", "", cleaned, flags=re.I).strip()
         res = open_url(target_url)
@@ -403,6 +527,13 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     if lower_input in ("get cursor pos", "cursor pos", "cursor position", "mouse pos", "mouse position"):
         res = get_cursor_position()
         return True, res.get("message")
+    if lower_input.startswith("drag to ") or lower_input.startswith("drag mouse to "):
+        coords = re.sub(r"^(drag to|drag mouse to)\s*", "", lower_input).strip()
+        parts = re.split(r"[,\s]+", coords)
+        if len(parts) >= 2:
+            res = drag_to(parts[0], parts[1])
+            return True, res.get("message")
+        return True, "Please provide X and Y coordinates to drag to. Example: 'drag to 600 400'"
     if lower_input.startswith("move cursor ") or lower_input.startswith("move mouse "):
         coords = re.sub(r"^(move cursor to|move mouse to|move cursor|move mouse)\s*", "", lower_input).strip()
         parts = re.split(r"[,\s]+", coords)
@@ -437,7 +568,19 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         except ValueError:
             return True, "Please specify a scroll amount. Example: 'scroll up' or 'scroll -120'"
 
-    # 13. File Archive Hands (Zip / Unzip)
+    # 13. File Archive Hands (Zip / Tar / Testing)
+    if lower_input.startswith("create tar ") or lower_input.startswith("tar "):
+        raw_cmd = re.sub(r"^(create tar|tar)\s+", "", cleaned, flags=re.I).strip()
+        if " to " in raw_cmd:
+            src_part, dest_part = raw_cmd.split(" to ", 1)
+            res = create_tar(src_part.strip(), dest_part.strip())
+        else:
+            res = create_tar(raw_cmd)
+        return True, res.get("message")
+    if lower_input.startswith("test archive ") or lower_input.startswith("verify archive "):
+        raw_arch = re.sub(r"^(test archive|verify archive)\s+", "", cleaned, flags=re.I).strip()
+        res = test_archive(raw_arch)
+        return True, res.get("message")
     if lower_input.startswith("zip ") or lower_input.startswith("compress "):
         raw_cmd = re.sub(r"^(zip|compress)\s+", "", cleaned, flags=re.I).strip()
         if " to " in raw_cmd:
@@ -468,7 +611,21 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
             return True, "\n".join(lines)
         return True, res.get("message")
 
+
     # 14. Windows Settings & Personalization
+    if lower_input in ("show wallpaper", "get wallpaper", "wallpaper"):
+        res = get_wallpaper()
+        return True, res.get("message")
+    if lower_input.startswith("set wallpaper "):
+        wp_path = cleaned[14:].strip()
+        res = set_wallpaper(wp_path)
+        return True, res.get("message")
+    if lower_input in ("enable transparency", "transparency on"):
+        res = set_transparency_effects(True)
+        return True, res.get("message")
+    if lower_input in ("disable transparency", "transparency off"):
+        res = set_transparency_effects(False)
+        return True, res.get("message")
     if lower_input in ("show theme", "get theme", "theme", "what theme"):
         res = get_theme_mode()
         return True, res.get("message")
@@ -482,7 +639,19 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         res = get_accent_color()
         return True, res.get("message")
 
-    # 15. Timers & Uptime
+    # 15. Timers, Uptime & Stopwatch
+    if lower_input.startswith("start stopwatch"):
+        sw_name = re.sub(r"^start stopwatch\s*", "", cleaned, flags=re.I).strip() or "default"
+        res = start_stopwatch(sw_name)
+        return True, res.get("message")
+    if lower_input.startswith("lap stopwatch"):
+        sw_name = re.sub(r"^lap stopwatch\s*", "", cleaned, flags=re.I).strip() or "default"
+        res = lap_stopwatch(sw_name)
+        return True, res.get("message")
+    if lower_input.startswith("stop stopwatch"):
+        sw_name = re.sub(r"^stop stopwatch\s*", "", cleaned, flags=re.I).strip() or "default"
+        res = stop_stopwatch(sw_name)
+        return True, res.get("message")
     if lower_input in ("system uptime", "uptime", "show uptime"):
         res = get_system_uptime()
         return True, res.get("message")
@@ -502,6 +671,13 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         return True, res.get("message")
 
     # 16. Display Brightness Hands
+    if lower_input.startswith("fade brightness "):
+        f_val = cleaned[16:].strip()
+        try:
+            res = fade_brightness(int(f_val))
+            return True, res.get("message")
+        except ValueError:
+            pass
     if lower_input in ("show brightness", "brightness", "get brightness"):
         res = get_brightness()
         return True, res.get("message")
@@ -517,6 +693,17 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         return True, res.get("message")
 
     # 17. Wi-Fi Tools & DNS
+    if lower_input.startswith("connect wifi ") or lower_input.startswith("connect to wifi "):
+        ssid = re.sub(r"^(connect wifi|connect to wifi)\s+", "", cleaned, flags=re.I).strip()
+        res = connect_to_wifi(ssid)
+        return True, res.get("message")
+    if lower_input in ("disconnect wifi", "disconnect from wifi"):
+        res = disconnect_wifi()
+        return True, res.get("message")
+    if lower_input.startswith("forget wifi ") or lower_input.startswith("delete wifi "):
+        ssid = re.sub(r"^(forget wifi|delete wifi)\s+", "", cleaned, flags=re.I).strip()
+        res = delete_wifi_profile(ssid)
+        return True, res.get("message")
     if lower_input in ("show saved wifi", "saved wifi", "wifi profiles", "list wifi profiles", "show wifi profiles"):
         res = get_saved_wifi_profiles()
         return True, res.get("message")
@@ -556,6 +743,10 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         svc = re.sub(r"^(service status|status of service)\s+", "", cleaned, flags=re.I).strip()
         res = get_service_status(svc)
         return True, res.get("message")
+    if lower_input.startswith("service description "):
+        svc = cleaned[20:].strip()
+        res = get_service_description(svc)
+        return True, res.get("message")
     if lower_input.startswith("list services") or lower_input.startswith("show services"):
         filt = re.sub(r"^(list services|show services)\s*", "", cleaned, flags=re.I).strip()
         res = list_services(filt)
@@ -570,6 +761,10 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         return True, res.get("message")
 
     # 19. Installed Software Inventory
+    if lower_input.startswith("uninstall command for ") or lower_input.startswith("uninstall command "):
+        app_q = re.sub(r"^(uninstall command for|uninstall command)\s+", "", cleaned, flags=re.I).strip()
+        res = get_app_uninstall_command(app_q)
+        return True, res.get("message")
     if lower_input.startswith("app version ") or lower_input.startswith("version of "):
         app_q = re.sub(r"^(app version|version of)\s+", "", cleaned, flags=re.I).strip()
         res = get_app_version(app_q)
@@ -588,6 +783,16 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         return True, res.get("message")
 
     # 20. Cryptographic File Hashes & Checksums
+    if lower_input.startswith("compare files "):
+        remainder = cleaned[14:].strip()
+        if " and " in remainder:
+            f1, f2 = remainder.split(" and ", 1)
+            res = compare_files(f1.strip(), f2.strip())
+            return True, res.get("message")
+    if lower_input.startswith("hash text "):
+        txt = cleaned[10:].strip()
+        res = hash_text(txt)
+        return True, res.get("message")
     if lower_input.startswith("verify checksum "):
         remainder = cleaned[16:].strip()
         parts = remainder.split(maxsplit=1)
@@ -615,11 +820,24 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         return True, res.get("message")
 
     # 21. Display & Multi-Monitor Metrics
+    if lower_input in ("detailed monitors", "show monitors detail", "list monitors detail", "monitors detail"):
+        res = get_monitors_detail()
+        return True, res.get("message")
+    if lower_input in ("display modes", "screen refresh rate", "refresh rate"):
+        res = get_display_modes()
+        return True, res.get("message")
     if lower_input in ("show display info", "display info", "screen resolution", "display resolution", "resolution", "monitors", "show monitors"):
         res = get_display_info()
         return True, res.get("message")
 
     # 22. Storage Drives & Removable USBs
+    if lower_input in ("check drive space", "check disk space", "drive warnings", "low disk space"):
+        res = check_drive_space_warning()
+        return True, res.get("message")
+    if lower_input.startswith("eject drive ") or lower_input.startswith("eject usb "):
+        drv = re.sub(r"^(eject drive|eject usb)\s+", "", cleaned, flags=re.I).strip()
+        res = eject_usb_drive(drv)
+        return True, res.get("message")
     if lower_input in ("show usb drives", "usb drives", "removable drives", "show removable drives", "list usb"):
         res = get_removable_drives()
         return True, res.get("message")
@@ -629,12 +847,19 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
 
 
 
+
     # 10. System Information commands
     if lower_input in ("show system info", "system info"):
         res = get_system_info()
         return True, res.get("message")
     if lower_input in ("show cpu usage", "cpu usage", "show cpu", "cpu"):
         res = get_cpu_usage()
+        return True, res.get("message")
+    if lower_input in ("show cpu details", "cpu details", "cpu info"):
+        res = get_cpu_details()
+        return True, res.get("message")
+    if lower_input in ("show motherboard info", "motherboard info", "motherboard", "show motherboard"):
+        res = get_motherboard_info()
         return True, res.get("message")
     if lower_input in ("show ram usage", "ram usage", "show ram", "ram", "memory usage"):
         res = get_ram_usage()
@@ -653,6 +878,10 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     if lower_input in ("show listening ports", "listening ports", "show ports", "ports"):
         res = get_listening_ports()
         return True, res.get("message")
+    if lower_input.startswith("kill port ") or lower_input.startswith("free port "):
+        port_str = re.sub(r"^(kill port|free port)\s+", "", lower_input).strip()
+        res = kill_port_process(port_str)
+        return True, res.get("message")
     if lower_input.startswith("what is using port ") or lower_input.startswith("what is on port "):
         port_str = re.sub(r"^(what is using port|what is on port)\s+", "", lower_input).strip()
         res = what_is_using_port(port_str)
@@ -666,6 +895,9 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     # 12. Network commands
     if lower_input in ("show network info", "network info", "network"):
         res = get_network_info()
+        return True, res.get("message")
+    if lower_input in ("show public ip", "public ip", "get public ip", "my public ip", "whats my public ip"):
+        res = get_public_ip()
         return True, res.get("message")
     if lower_input in ("show ip address", "ip address", "ip", "show ip"):
         res = get_ip_address()
@@ -682,6 +914,26 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         return True, res.get("message")
 
     # 13. Window management commands
+    if lower_input.startswith("snap left ") or (lower_input.startswith("snap ") and lower_input.endswith(" left")):
+        target = re.sub(r"^snap left\s+", "", cleaned, flags=re.IGNORECASE)
+        target = re.sub(r"^snap\s+", "", target, flags=re.IGNORECASE)
+        target = re.sub(r"\s+left$", "", target, flags=re.IGNORECASE).strip()
+        res = snap_window(target, "left")
+        return True, res.get("message")
+    if lower_input.startswith("snap right ") or (lower_input.startswith("snap ") and lower_input.endswith(" right")):
+        target = re.sub(r"^snap right\s+", "", cleaned, flags=re.IGNORECASE)
+        target = re.sub(r"^snap\s+", "", target, flags=re.IGNORECASE)
+        target = re.sub(r"\s+right$", "", target, flags=re.IGNORECASE).strip()
+        res = snap_window(target, "right")
+        return True, res.get("message")
+    if lower_input.startswith("pin ") or lower_input.startswith("pin on top ") or lower_input.startswith("always on top "):
+        target = re.sub(r"^(pin on top|pin|always on top)\s+", "", cleaned, flags=re.IGNORECASE).strip()
+        res = set_always_on_top(target, True)
+        return True, res.get("message")
+    if lower_input.startswith("unpin ") or lower_input.startswith("unpin from top "):
+        target = re.sub(r"^(unpin from top|unpin)\s+", "", cleaned, flags=re.IGNORECASE).strip()
+        res = set_always_on_top(target, False)
+        return True, res.get("message")
     if lower_input.startswith("minimize "):
         target_app = cleaned[9:].strip()
         res = minimize_window(target_app)
@@ -711,7 +963,15 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         res = list_windows()
         return True, res.get("message")
 
-    # 14. Application lifecycle: close & restart
+    # 14. Application & Process lifecycle: close, restart, kill, top
+    if lower_input in ("show top processes", "top processes", "top memory processes", "top memory"):
+        res = get_top_processes(10)
+        return True, res.get("message")
+    if lower_input.startswith("kill process ") or lower_input.startswith("kill "):
+        target = re.sub(r"^(kill process|kill)\s+", "", cleaned, flags=re.IGNORECASE).strip()
+        if not target.startswith("port "):
+            res = kill_process(target)
+            return True, res.get("message")
     if lower_input.startswith("close "):
         target_app = cleaned[6:].strip()
         res = close_application(target_app)
@@ -721,7 +981,19 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         res = restart_application(target_app)
         return True, res.get("message")
 
-    # 15. Filesystem: list, create, copy, move, rename, delete, find
+    # 15. Filesystem: list, create, copy, move, rename, delete, find, head, tail, folder size
+    if lower_input.startswith("read head ") or lower_input.startswith("head "):
+        target = re.sub(r"^(read head|head)\s+", "", cleaned, flags=re.IGNORECASE).strip()
+        res = read_file_head(target)
+        return True, res.get("message")
+    if lower_input.startswith("read tail ") or lower_input.startswith("tail "):
+        target = re.sub(r"^(read tail|tail)\s+", "", cleaned, flags=re.IGNORECASE).strip()
+        res = read_file_tail(target)
+        return True, res.get("message")
+    if lower_input.startswith("folder size ") or lower_input.startswith("size of folder ") or lower_input.startswith("folder size of "):
+        target = re.sub(r"^(folder size of|size of folder|folder size)\s+", "", cleaned, flags=re.IGNORECASE).strip()
+        res = get_folder_size(target)
+        return True, res.get("message")
     if lower_input.startswith("show files in ") or lower_input.startswith("list files in "):
         folder_query = cleaned[14:].strip()
         if not folder_query:
@@ -799,6 +1071,16 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         return True, result.get("message", f"Failed to search for '{query}'.")
 
     # 16. Open command handling
+    if lower_input.startswith("open as admin ") or lower_input.startswith("run as admin "):
+        target = re.sub(r"^(open as admin|run as admin)\s+", "", cleaned, flags=re.IGNORECASE).strip()
+        res = open_application_as_admin(target)
+        return True, res.get("message")
+
+    if lower_input.startswith("open file "):
+        target = cleaned[10:].strip()
+        res = open_file_with_default_app(target)
+        return True, res.get("message")
+
     if lower_input.startswith("open "):
         raw_target = cleaned[5:].strip()
         if not raw_target:

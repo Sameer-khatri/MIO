@@ -48,6 +48,34 @@ def hash_file(file_path: str, algorithm: str = "sha256") -> dict:
         }
 
 
+def hash_text(text: str, algorithm: str = "sha256") -> dict:
+    """
+    Computes cryptographic hash of a raw string or token.
+    """
+    if text is None:
+        return {"success": False, "message": "Text cannot be None."}
+
+    algo_name = algorithm.strip().lower()
+    encoded = text.encode("utf-8")
+
+    if algo_name == "md5":
+        digest = hashlib.md5(encoded).hexdigest()
+    elif algo_name == "sha1":
+        digest = hashlib.sha1(encoded).hexdigest()
+    elif algo_name == "sha512":
+        digest = hashlib.sha512(encoded).hexdigest()
+    else:
+        digest = hashlib.sha256(encoded).hexdigest()
+        algo_name = "sha256"
+
+    return {
+        "success": True,
+        "algorithm": algo_name.upper(),
+        "hash": digest,
+        "message": f"{algo_name.upper()}: {digest}"
+    }
+
+
 def verify_checksum(file_path: str, expected_hash: str, algorithm: str = None) -> dict:
     """
     Verifies if a file matches an expected checksum. Auto-detects algorithm by length if not specified.
@@ -83,3 +111,34 @@ def verify_checksum(file_path: str, expected_hash: str, algorithm: str = None) -
         "actual": actual,
         "message": f"Checksum {status_str}! ({calc_res.get('algorithm')})"
     }
+
+
+def compare_files(file1: str, file2: str) -> dict:
+    """
+    Compares two files byte-by-byte to determine if they are bitwise identical.
+    """
+    p1 = os.path.abspath(os.path.expanduser(file1.strip()))
+    p2 = os.path.abspath(os.path.expanduser(file2.strip()))
+
+    if not os.path.exists(p1) or not os.path.isfile(p1):
+        return {"success": False, "message": f"File does not exist: {p1}"}
+    if not os.path.exists(p2) or not os.path.isfile(p2):
+        return {"success": False, "message": f"File does not exist: {p2}"}
+
+    if os.path.getsize(p1) != os.path.getsize(p2):
+        return {
+            "success": True,
+            "identical": False,
+            "message": f"Files differ in size ({os.path.getsize(p1)} bytes vs {os.path.getsize(p2)} bytes)."
+        }
+
+    try:
+        with open(p1, "rb") as f1, open(p2, "rb") as f2:
+            while chunk1 := f1.read(65536):
+                chunk2 = f2.read(65536)
+                if chunk1 != chunk2:
+                    return {"success": True, "identical": False, "message": "Files have differing content."}
+
+        return {"success": True, "identical": True, "message": "Files are 100% bitwise identical."}
+    except Exception as err:
+        return {"success": False, "message": f"Comparison failed: {err}"}

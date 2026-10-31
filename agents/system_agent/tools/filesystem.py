@@ -956,4 +956,111 @@ def delete_file_or_folder(source_query: str) -> dict:
     }
 
 
+def read_file_head(file_path: str, num_lines: int = 20) -> dict:
+    """
+    Reads the first N lines from a text, code, or log file.
+    """
+    if not file_path or not isinstance(file_path, str):
+        return {"success": False, "message": "File path is required."}
+
+    norm_path = os.path.abspath(os.path.expanduser(file_path.strip()))
+    if not os.path.exists(norm_path) or not os.path.isfile(norm_path):
+        return {"success": False, "message": f"File does not exist: '{norm_path}'"}
+
+    lines = []
+    try:
+        with open(norm_path, "r", encoding="utf-8", errors="replace") as f:
+            for _ in range(max(1, int(num_lines))):
+                line = f.readline()
+                if not line:
+                    break
+                lines.append(line.rstrip("\r\n"))
+
+        return {
+            "success": True,
+            "file": norm_path,
+            "lines_read": len(lines),
+            "line_count": len(lines),
+            "content": "\n".join(lines),
+            "message": f"--- First {len(lines)} lines of {os.path.basename(norm_path)} ---\n" + "\n".join(lines)
+        }
+    except Exception as err:
+        return {"success": False, "message": f"Failed to read file: {err}"}
+
+
+def read_file_tail(file_path: str, num_lines: int = 20) -> dict:
+    """
+    Reads the last N lines from a text, code, or log file.
+    """
+    if not file_path or not isinstance(file_path, str):
+        return {"success": False, "message": "File path is required."}
+
+    norm_path = os.path.abspath(os.path.expanduser(file_path.strip()))
+    if not os.path.exists(norm_path) or not os.path.isfile(norm_path):
+        return {"success": False, "message": f"File does not exist: '{norm_path}'"}
+
+    max_lines = max(1, int(num_lines))
+    lines = []
+    try:
+        with open(norm_path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+
+        tail_lines = [l.rstrip("\r\n") for l in lines[-max_lines:]]
+        return {
+            "success": True,
+            "file": norm_path,
+            "lines_read": len(tail_lines),
+            "line_count": len(tail_lines),
+            "content": "\n".join(tail_lines),
+            "message": f"--- Last {len(tail_lines)} lines of {os.path.basename(norm_path)} ---\n" + "\n".join(tail_lines)
+        }
+    except Exception as err:
+        return {"success": False, "message": f"Failed to read file: {err}"}
+
+
+def get_folder_size(folder_path: str) -> dict:
+    """
+    Recursively computes the total disk footprint and item count of any directory.
+    """
+    if not folder_path or not isinstance(folder_path, str):
+        return {"success": False, "message": "Folder path is required."}
+
+    norm_path = os.path.abspath(os.path.expanduser(folder_path.strip()))
+    if not os.path.exists(norm_path) or not os.path.isdir(norm_path):
+        return {"success": False, "message": f"Folder does not exist: '{norm_path}'"}
+
+    total_bytes = 0
+    file_count = 0
+    dir_count = 0
+
+    try:
+        for root, dirs, files in os.walk(norm_path):
+            dir_count += len(dirs)
+            for f in files:
+                file_count += 1
+                try:
+                    fp = os.path.join(root, f)
+                    total_bytes += os.path.getsize(fp)
+                except (OSError, FileNotFoundError):
+                    pass
+
+        size_mb = round(total_bytes / (1024 ** 2), 2)
+        size_gb = round(total_bytes / (1024 ** 3), 3)
+
+        return {
+            "success": True,
+            "folder": norm_path,
+            "total_bytes": total_bytes,
+            "size_bytes": total_bytes,
+            "size_mb": size_mb,
+            "size_gb": size_gb,
+            "file_count": file_count,
+            "directory_count": dir_count,
+            "message": f"Folder '{os.path.basename(norm_path)}': {size_mb} MB ({file_count} files, {dir_count} subfolders)."
+        }
+    except Exception as err:
+        return {"success": False, "message": f"Failed to compute folder size: {err}"}
+
+
+
 

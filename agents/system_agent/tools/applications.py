@@ -1,3 +1,4 @@
+import ctypes
 import json
 import os
 import shutil
@@ -622,3 +623,53 @@ def open_application(app_name: str) -> dict:
         "success": False,
         "message": f"I couldn't find an installed application matching '{raw_query}'."
     }
+
+
+def open_application_as_admin(raw_query: str) -> dict:
+    """
+    Launches an application with elevated Windows Administrator privileges (UAC prompt).
+    """
+    import ctypes
+    clean_q = raw_query.strip()
+    if not clean_q:
+        return {"success": False, "message": "Application name is required."}
+
+    # Locate target
+    from tools.filesystem import locate_executable
+    loc = locate_executable(clean_q)
+    target = clean_q
+    if loc.get("success") and loc.get("matches"):
+        target = loc["matches"][0]
+    elif loc.get("target"):
+        target = loc["target"]
+
+    try:
+        ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", target, None, None, 1)
+        if ret > 32:
+            return {"success": True, "app": clean_q, "message": f"Launched '{clean_q}' as Administrator."}
+        return {"success": False, "message": f"ShellExecute returned error code {ret}."}
+    except Exception as err:
+        return {"success": False, "message": f"Failed to run as admin: {err}"}
+
+
+def open_file_with_default_app(file_path: str) -> dict:
+    """
+    Opens any document, image, audio, or project file using its default Windows file association.
+    """
+    if not file_path or not isinstance(file_path, str):
+        return {"success": False, "message": "File path is required."}
+
+    norm_path = os.path.abspath(os.path.expanduser(file_path.strip()))
+    if not os.path.exists(norm_path):
+        return {"success": False, "message": f"File does not exist: '{norm_path}'"}
+
+    try:
+        os.startfile(norm_path)
+        return {
+            "success": True,
+            "file": norm_path,
+            "message": f"Opened '{os.path.basename(norm_path)}' with default system handler."
+        }
+    except Exception as err:
+        return {"success": False, "message": f"Failed to open file: {err}"}
+

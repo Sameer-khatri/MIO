@@ -1,239 +1,250 @@
+import json
 import re
 import socket
 import subprocess
+import urllib.request
 
 
-def is_connected_to_internet(timeout: float = 2.0) -> dict:
+def get_ip_address() -> dict:
     """
-    Checks if the local machine has active internet connectivity by testing DNS endpoints.
+    Retrieves the local LAN IPv4 address and hostname of this computer.
     """
-    test_endpoints = [
-        ("8.8.8.8", 53),      # Google DNS
-        ("1.1.1.1", 53),      # Cloudflare DNS
-        ("208.67.222.222", 53), # OpenDNS
-    ]
-    for ip, port in test_endpoints:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
+    try:
+        hostname = socket.gethostname()
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            sock.connect((ip, port))
-            sock.close()
-            return {
-                "success": True,
-                "connected": True,
-                "message": "Yes, you are connected to the internet."
-            }
-        except OSError:
-            sock.close()
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+        except Exception:
+            ip = "127.0.0.1"
+        finally:
+            s.close()
+
+        return {
+            "success": True,
+            "hostname": hostname,
+            "ip": ip,
+            "message": f"Local IP Address: {ip} (Hostname: {hostname})"
+        }
+    except Exception as err:
+        return {
+            "success": False,
+            "ip": "127.0.0.1",
+            "message": f"Failed to retrieve local IP: {err}"
+        }
+
+
+def get_public_ip() -> dict:
+    """
+    Retrieves the external WAN / public Internet IP address of this network.
+    """
+    endpoints = [
+        "https://api.ipify.org",
+        "https://icanhazip.com",
+        "https://checkip.amazonaws.com"
+    ]
+    for url in endpoints:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "MIO/1.0"})
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                raw = resp.read().decode("utf-8", errors="ignore").strip()
+                match = re.search(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", raw)
+                if match:
+                    ip = match.group(1)
+                    return {
+                        "success": True,
+                        "public_ip": ip,
+                        "source": url,
+                        "message": f"Public Internet IP: {ip}"
+                    }
+        except Exception:
             continue
 
     return {
+        "success": False,
+        "public_ip": None,
+        "message": "Could not determine public IP (no internet access or timeout)."
+    }
+
+
+def is_connected_to_internet() -> dict:
+    """
+    Checks if computer has active connectivity to the global internet.
+    """
+    hosts_to_test = [("8.8.8.8", 53), ("1.1.1.1", 53), ("www.google.com", 80)]
+    connected = False
+    responding_host = None
+
+    for host, port in hosts_to_test:
+        try:
+            s = socket.create_connection((host, port), timeout=2.0)
+            s.close()
+            connected = True
+            responding_host = host
+            break
+        except Exception:
+            continue
+
+    if connected:
+        return {
+            "success": True,
+            "connected": True,
+            "message": f"Internet is connected and active (verified via {responding_host})."
+        }
+    return {
         "success": True,
         "connected": False,
-        "message": "No, there is no active internet connection detected."
+        "message": "Internet is disconnected (unable to reach external hosts)."
     }
 
 
 def get_wifi_info() -> dict:
     """
-    Retrieves Wi-Fi adapter state, connected SSID, and signal quality via netsh.
+    Retrieves connected Wi-Fi interface details (SSID, BSSID, Radio type, Signal percentage).
     """
     try:
-        out = subprocess.check_output(
+        output = subprocess.check_output(
             ["netsh", "wlan", "show", "interfaces"],
+            stderr=subprocess.DEVNULL,
             text=True,
             encoding="utf-8",
-            errors="ignore",
-            stderr=subprocess.DEVNULL,
-            timeout=5
+            errors="ignore"
         )
 
-        state_match = re.search(r"^\s*State\s*:\s*(.+)$", out, re.M)
-        ssid_match = re.search(r"^\s*SSID\s*:\s*(.+)$", out, re.M)
-        signal_match = re.search(r"^\s*Signal\s*:\s*(.+)$", out, re.M)
-        radio_match = re.search(r"^\s*Radio type\s*:\s*(.+)$", out, re.M)
+        ssid = None
+        signal = None
+        state = None
+        radio = None
 
-        state = state_match.group(1).strip() if state_match else "disconnected"
-        ssid = ssid_match.group(1).strip() if ssid_match else ""
-        signal = signal_match.group(1).strip() if signal_match else ""
-        radio = radio_match.group(1).strip() if radio_match else ""
+        for line in output.splitlines():
+            line = line.strip()
+            if line.startswith("SSID") and not line.startswith("BSSID"):
+                parts = line.split(":", 1)
+                if len(parts) > 1:
+                    ssid = parts[1].strip()
+            elif line.startswith("Signal"):
+                parts = line.split(":", 1)
+                if len(parts) > 1:
+                    signal = parts[1].strip()
+            elif line.startswith("State"):
+                parts = line.split(":", 1)
+                if len(parts) > 1:
+                    state = parts[1].strip()
+            elif line.startswith("Radio type"):
+                parts = line.split(":", 1)
+                if len(parts) > 1:
+                    radio = parts[1].strip()
 
-        is_connected = state.lower() == "connected"
-
-        lines = [f"Wi-Fi State: {state}"]
-        if ssid:
-            lines.append(f"Network (SSID): {ssid}")
-        if signal:
-            lines.append(f"Signal Strength: {signal}")
-        if radio:
-            lines.append(f"Radio Type: {radio}")
-
+        if ssid and state == "connected":
+            return {
+                "success": True,
+                "connected": True,
+                "ssid": ssid,
+                "signal": signal,
+                "radio": radio,
+                "message": f"Connected to Wi-Fi '{ssid}' (Signal: {signal}, {radio})."
+            }
+        elif state:
+            return {
+                "success": True,
+                "connected": False,
+                "ssid": None,
+                "message": f"Wi-Fi is {state} (not connected to any network)."
+            }
         return {
             "success": True,
-            "connected": is_connected,
-            "state": state,
-            "ssid": ssid,
-            "signal": signal,
-            "radio_type": radio,
-            "message": "\n".join(lines) if is_connected else "Wi-Fi is disconnected or unavailable."
-        }
-    except Exception as err:
-        return {
-            "success": False,
             "connected": False,
-            "state": "unknown",
-            "ssid": "",
-            "signal": "",
-            "radio_type": "",
-            "message": f"Failed to retrieve Wi-Fi info: {err}"
-        }
-
-
-def get_ip_address() -> dict:
-    """
-    Retrieves local hostname and active IPv4 addresses.
-    """
-    try:
-        hostname = socket.gethostname()
-        ip_list = []
-        try:
-            _, _, ips = socket.gethostbyname_ex(hostname)
-            ip_list = [ip for ip in ips if not ip.startswith("127.")]
-        except Exception:
-            pass
-
-        if not ip_list:
-            # Fallback test socket to detect primary outbound IP
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            try:
-                sock.connect(("10.255.255.255", 1))
-                ip_list = [sock.getsockname()[0]]
-            except Exception:
-                ip_list = ["127.0.0.1"]
-            finally:
-                sock.close()
-
-        primary_ip = ip_list[0] if ip_list else "Unknown"
-
-        lines = [f"Host: {hostname}"]
-        if len(ip_list) == 1:
-            lines.append(f"Local IP: {primary_ip}")
-        else:
-            lines.append(f"Primary IP: {primary_ip}")
-            lines.append("All Local IPs: " + ", ".join(ip_list))
-
-        return {
-            "success": True,
-            "hostname": hostname,
-            "primary_ip": primary_ip,
-            "ips": ip_list,
-            "message": "\n".join(lines)
+            "ssid": None,
+            "message": "No active Wi-Fi interface found (wired Ethernet or Wi-Fi disabled)."
         }
     except Exception as err:
         return {
             "success": False,
-            "hostname": "",
-            "primary_ip": "",
-            "ips": [],
-            "message": f"Failed to retrieve IP address: {err}"
+            "message": f"Failed to inspect Wi-Fi interface: {err}"
+        }
+
+
+def ping_host(target: str, count: int = 2) -> dict:
+    """
+    Sends safe ICMP ping requests to verify network latency and host reachability.
+    """
+    if not target or not isinstance(target, str):
+        return {"success": False, "message": "Host target is required."}
+
+    clean_target = target.strip()
+    if not re.match(r"^[a-zA-Z0-9\.\-_:]+$", clean_target):
+        return {"success": False, "message": f"Invalid host name or IP address: '{clean_target}'."}
+
+    num = max(1, min(10, int(count)))
+    try:
+        output = subprocess.check_output(
+            ["ping", "-n", str(num), clean_target],
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="ignore"
+        )
+
+        avg_ms = None
+        loss_pct = 0
+        match_time = re.search(r"Average\s*=\s*(\d+)ms", output)
+        if match_time:
+            avg_ms = int(match_time.group(1))
+
+        match_loss = re.search(r"\((\d+)%\s*loss\)", output)
+        if match_loss:
+            loss_pct = int(match_loss.group(1))
+
+        reachable = (loss_pct < 100)
+        status_msg = f"Host '{clean_target}' is reachable" if reachable else f"Host '{clean_target}' is unreachable (100% packet loss)"
+        if avg_ms is not None:
+            status_msg += f" (Latency: {avg_ms} ms, {loss_pct}% loss)."
+        else:
+            status_msg += f" ({loss_pct}% loss)."
+
+        return {
+            "success": True,
+            "target": clean_target,
+            "reachable": reachable,
+            "avg_ms": avg_ms,
+            "average_ms": avg_ms,
+            "packet_loss_percent": loss_pct,
+            "message": status_msg
+        }
+    except Exception as err:
+        return {
+            "success": False,
+            "target": clean_target,
+            "reachable": False,
+            "message": f"Ping failed for '{clean_target}': {err}"
         }
 
 
 def get_network_info() -> dict:
     """
-    Aggregates IP configuration, Wi-Fi status, and internet reachability.
+    Provides a comprehensive overview of local IP, public IP, Wi-Fi status, and internet reachability.
     """
-    ip_res = get_ip_address()
-    wifi_res = get_wifi_info()
-    net_res = is_connected_to_internet()
+    local = get_ip_address()
+    pub = get_public_ip()
+    wifi = get_wifi_info()
+    inet = is_connected_to_internet()
 
     lines = [
-        f"Host: {ip_res.get('hostname', 'Unknown')}",
-        f"Local IP: {ip_res.get('primary_ip', 'Unknown')}",
-        f"Wi-Fi: {wifi_res.get('ssid', 'Disconnected') or 'Disconnected'} ({wifi_res.get('signal', 'N/A')})",
-        f"Internet: {'Connected' if net_res.get('connected') else 'Offline'}"
+        f"Local IP: {local.get('ip')} ({local.get('hostname')})",
+        f"Public IP: {pub.get('public_ip', 'Unavailable')}",
+        f"Internet: {'Connected' if inet.get('connected') else 'Disconnected'}",
     ]
+    if wifi.get("connected"):
+        lines.append(f"Wi-Fi: {wifi.get('ssid')} ({wifi.get('signal')})")
+    else:
+        lines.append("Wi-Fi: Disconnected")
 
     return {
         "success": True,
-        "ip_info": ip_res,
-        "wifi_info": wifi_res,
-        "internet": net_res,
-        "message": "\n".join(lines)
+        "local_ip": local.get("ip"),
+        "public_ip": pub.get("public_ip"),
+        "hostname": local.get("hostname"),
+        "wifi": wifi,
+        "internet_connected": inet.get("connected"),
+        "message": "Network Overview:\n" + "\n".join(f"- {l}" for l in lines)
     }
-
-
-def ping_host(host: str, count: int = 2) -> dict:
-    """
-    Pings a target host safely without shell invocation.
-    Validates host against strict hostname/IP pattern to prevent injection.
-    """
-    if not host or not isinstance(host, str):
-        return {
-            "success": False,
-            "host": "",
-            "message": "Invalid host specified."
-        }
-
-    clean_host = host.strip().lower()
-
-    # Strict hostname/IP validation
-    if not re.match(r"^[a-zA-Z0-9.-]+$", clean_host) or clean_host.startswith("-") or clean_host.startswith("."):
-        return {
-            "success": False,
-            "host": clean_host,
-            "message": f"Invalid host format: '{clean_host}'. Only valid hostnames or IP addresses allowed."
-        }
-
-    safe_count = max(1, min(10, count))
-
-    try:
-        out = subprocess.check_output(
-            ["ping", "-n", str(safe_count), clean_host],
-            text=True,
-            encoding="utf-8",
-            errors="ignore",
-            stderr=subprocess.STDOUT,
-            timeout=10
-        )
-
-        loss_match = re.search(r"(\d+)%\s*loss", out, re.I)
-        loss_pct = int(loss_match.group(1)) if loss_match else (100 if "timed out" in out.lower() or "unreachable" in out.lower() else 0)
-
-        avg_match = re.search(r"Average\s*=\s*(\d+)ms", out, re.I)
-        avg_ms = int(avg_match.group(1)) if avg_match else None
-
-        reachable = loss_pct < 100
-
-        if reachable:
-            speed_str = f", average latency {avg_ms}ms" if avg_ms is not None else ""
-            msg = f"Ping to {clean_host} succeeded ({loss_pct}% loss{speed_str})."
-        else:
-            msg = f"Ping to {clean_host} failed (100% packet loss / unreachable)."
-
-        return {
-            "success": True,
-            "host": clean_host,
-            "reachable": reachable,
-            "loss_percent": loss_pct,
-            "average_ms": avg_ms,
-            "message": msg
-        }
-    except subprocess.TimeoutExpired:
-        return {
-            "success": True,
-            "host": clean_host,
-            "reachable": False,
-            "loss_percent": 100,
-            "average_ms": None,
-            "message": f"Ping to {clean_host} timed out."
-        }
-    except Exception as err:
-        return {
-            "success": False,
-            "host": clean_host,
-            "reachable": False,
-            "loss_percent": 100,
-            "average_ms": None,
-            "message": f"Failed to ping '{clean_host}': {err}"
-        }

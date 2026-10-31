@@ -7,6 +7,7 @@ try:
 except AttributeError:
     user32 = None
 
+MOUSEEVENTF_MOVE = 0x0001
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
 MOUSEEVENTF_RIGHTDOWN = 0x0008
@@ -58,6 +59,52 @@ def move_cursor(x: int, y: int) -> dict:
     return {"success": False, "message": f"Failed to move cursor to ({target_x}, {target_y})."}
 
 
+get_mouse_position = get_cursor_position
+set_mouse_position = move_cursor
+
+
+def move_relative(dx: int, dy: int) -> dict:
+    """Moves cursor relative to its current position."""
+    pos = get_cursor_position()
+    if not pos.get("success"):
+        return pos
+    new_x = pos["x"] + int(dx)
+    new_y = pos["y"] + int(dy)
+    return move_cursor(new_x, new_y)
+
+
+def mouse_down(button: str = "left") -> dict:
+    """Presses and holds down a mouse button ('left', 'right', 'middle')."""
+    if not user32:
+        return {"success": False, "message": "user32 is unavailable."}
+
+    btn = button.strip().lower()
+    flag = MOUSEEVENTF_LEFTDOWN
+    if btn == "right":
+        flag = MOUSEEVENTF_RIGHTDOWN
+    elif btn == "middle":
+        flag = MOUSEEVENTF_MIDDLEDOWN
+
+    user32.mouse_event(flag, 0, 0, 0, 0)
+    return {"success": True, "button": btn, "message": f"{btn.title()} mouse button pressed down."}
+
+
+def mouse_up(button: str = "left") -> dict:
+    """Releases a mouse button ('left', 'right', 'middle')."""
+    if not user32:
+        return {"success": False, "message": "user32 is unavailable."}
+
+    btn = button.strip().lower()
+    flag = MOUSEEVENTF_LEFTUP
+    if btn == "right":
+        flag = MOUSEEVENTF_RIGHTUP
+    elif btn == "middle":
+        flag = MOUSEEVENTF_MIDDLEUP
+
+    user32.mouse_event(flag, 0, 0, 0, 0)
+    return {"success": True, "button": btn, "message": f"{btn.title()} mouse button released."}
+
+
 def click(button: str = "left", double: bool = False) -> dict:
     """
     Simulates a mouse click at current cursor position.
@@ -105,11 +152,42 @@ def double_click() -> dict:
     return click("left", double=True)
 
 
+def drag_to(target_x: int, target_y: int, button: str = "left", steps: int = 15) -> dict:
+    """
+    Smoothly drags the cursor from its current position to (target_x, target_y).
+    """
+    pos = get_cursor_position()
+    if not pos.get("success"):
+        return pos
+
+    start_x, start_y = pos["x"], pos["y"]
+    dest_x, dest_y = int(target_x), int(target_y)
+
+    mouse_down(button)
+    time.sleep(0.02)
+
+    for i in range(1, steps + 1):
+        curr_x = int(start_x + (dest_x - start_x) * (i / steps))
+        curr_y = int(start_y + (dest_y - start_y) * (i / steps))
+        user32.SetCursorPos(curr_x, curr_y)
+        time.sleep(0.01)
+
+    time.sleep(0.02)
+    mouse_up(button)
+
+    return {
+        "success": True,
+        "from": (start_x, start_y),
+        "to": (dest_x, dest_y),
+        "button": button,
+        "message": f"Dragged cursor from ({start_x}, {start_y}) to ({dest_x}, {dest_y})."
+    }
+
+
 def mouse_scroll(amount: int = 120) -> dict:
     """
     Scrolls the mouse wheel vertically.
     Positive values scroll up; negative values scroll down.
-    Default standard wheel delta is 120 (1 notch up) or -120 (1 notch down).
     """
     if not user32:
         return {"success": False, "message": "user32 is unavailable."}

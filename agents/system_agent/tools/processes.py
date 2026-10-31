@@ -336,3 +336,76 @@ def is_application_running(query: str) -> dict:
         "name": display_name,
         "message": f"{display_name} is not running."
     }
+
+
+def kill_process(target: str | int) -> dict:
+    """
+    Forcefully terminates a process by PID or process name.
+    """
+    if not target:
+        return {"success": False, "message": "Process target (PID or name) is required."}
+
+    target_str = str(target).strip()
+    if target_str.isdigit():
+        cmd = ["taskkill", "/F", "/PID", target_str]
+    else:
+        im_name = target_str if target_str.lower().endswith(".exe") else f"{target_str}.exe"
+        cmd = ["taskkill", "/F", "/IM", im_name]
+
+    try:
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="ignore")
+        return {
+            "success": True,
+            "target": target,
+            "message": f"Successfully killed process: {output.strip()}"
+        }
+    except subprocess.CalledProcessError as err:
+        return {
+            "success": False,
+            "target": target,
+            "message": f"Failed to kill process '{target}': {err.output.strip() if err.output else err}"
+        }
+
+
+def get_top_processes(count: int = 5) -> dict:
+    """
+    Returns the top processes consuming the most system memory (RAM).
+    """
+    try:
+        output = subprocess.check_output(
+            ["tasklist", "/FO", "CSV", "/NH"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="ignore"
+        )
+        procs = []
+        for line in output.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = [p.strip(' "') for p in line.split('","')]
+            if len(parts) >= 5:
+                name = parts[0]
+                try:
+                    pid = int(parts[1])
+                    mem_str = parts[4].replace(",", "").replace(".", "").replace(" K", "").replace("K", "").strip()
+                    mem_kb = int(mem_str)
+                    mem_mb = round(mem_kb / 1024.0, 1)
+                    procs.append({"name": name, "pid": pid, "mem_mb": mem_mb})
+                except ValueError:
+                    pass
+
+        # Sort descending by RAM usage
+        procs.sort(key=lambda x: x["mem_mb"], reverse=True)
+        top = procs[:count]
+        return {
+            "success": True,
+            "count": len(top),
+            "processes": top,
+            "top_processes": top,
+            "message": "Top memory processes: " + ", ".join(f"{p['name']} ({p['mem_mb']} MB)" for p in top)
+        }
+    except Exception as err:
+        return {"success": False, "processes": [], "top_processes": [], "message": f"Failed to inspect top processes: {err}"}
+

@@ -1,31 +1,33 @@
-import csv
-import io
 import re
 import socket
 import subprocess
 
 
 def _get_process_map() -> dict[int, str]:
-    """Builds a PID -> process name lookup table using tasklist."""
+    """
+    Builds a map of {PID: process_name} using Windows tasklist.
+    """
     proc_map = {}
     try:
-        out = subprocess.check_output(
-            ["tasklist", "/fo", "csv", "/nh"],
+        output = subprocess.check_output(
+            ["tasklist", "/FO", "CSV", "/NH"],
+            stderr=subprocess.DEVNULL,
             text=True,
             encoding="utf-8",
-            errors="ignore",
-            stderr=subprocess.DEVNULL,
-            timeout=5
+            errors="ignore"
         )
-        reader = csv.reader(io.StringIO(out))
-        for row in reader:
-            if len(row) >= 2:
-                name = row[0].strip()
+        for line in output.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = [p.strip(' "') for p in line.split('","')]
+            if len(parts) >= 2:
+                name = parts[0]
                 try:
-                    pid = int(row[1].strip())
+                    pid = int(parts[1])
                     proc_map[pid] = name
                 except ValueError:
-                    continue
+                    pass
     except Exception:
         pass
     return proc_map
@@ -33,166 +35,188 @@ def _get_process_map() -> dict[int, str]:
 
 def get_listening_ports() -> dict:
     """
-    Returns all actively listening TCP and UDP ports on the system.
+    Finds all active TCP and UDP listening ports on this machine and maps them
+    to their owning process names and PIDs.
     """
     try:
-        out = subprocess.check_output(
-            ["netstat", "-ano"],
+        output = subprocess.check_output(
+            ["netstat", "-ano", "-p", "tcp"],
+            stderr=subprocess.DEVNULL,
             text=True,
             encoding="utf-8",
-            errors="ignore",
-            stderr=subprocess.DEVNULL,
-            timeout=8
+            errors="ignore"
         )
+
         proc_map = _get_process_map()
-        ports = []
-        seen = set()
+        ports_seen = {}
 
-        for line in out.splitlines():
+        for line in output.splitlines():
             line = line.strip()
-            if not line:
-                continue
+            if "LISTENING" in line:
+                parts = line.split()
+                if len(parts) >= 5:
+                    proto = parts[0]
+                    local_addr = parts[1]
+                    pid_str = parts[4]
 
-            parts = line.split()
-            if len(parts) >= 4 and parts[0].upper() == "TCP" and parts[3].upper() == "LISTENING":
-                local_addr = parts[1]
-                pid_str = parts[-1]
-                try:
-                    pid = int(pid_str)
-                except ValueError:
-                    pid = 0
+                    port_match = re.search(r":(\d+)$", local_addr)
+                    if port_match:
+                        port_num = int(port_match.group(1))
+                        try:
+                            pid_num = int(pid_str)
+                        except ValueError:
+                            pid_num = 0
 
-                # Extract port from local_addr (e.g. 0.0.0.0:8080 or [::]:8080)
-                port_match = re.search(r":(\d+)$", local_addr)
-                if port_match:
-                    port_num = int(port_match.group(1))
-                    key = ("TCP", port_num, pid)
-                    if key not in seen:
-                        seen.add(key)
-                        proc_name = proc_map.get(pid, f"PID {pid}" if pid > 0 else "System")
-                        ports.append({
-                            "protocol": "TCP",
-                            "address": local_addr,
-                            "port": port_num,
-                            "pid": pid,
-                            "process_name": proc_name
-                        })
+                        proc_name = proc_map.get(pid_num, "Unknown Process")
 
-        ports.sort(key=lambda x: x["port"])
+                        if port_num not in ports_seen:
+                            ports_seen[port_num] = {
+                                "port": port_num,
+                                "protocol": proto,
+                                "pid": pid_num,
+                                "process_name": proc_name,
+                                "address": local_addr
+                            }
 
-        if ports:
-            summary_lines = [f"- Port {p['port']} (TCP) — {p['process_name']} (PID {p['pid']})" for p in ports[:25]]
-            if len(ports) > 25:
-                summary_lines.append(f"... and {len(ports) - 25} more ports.")
-            msg = f"Listening Ports ({len(ports)} found):\n" + "\n".join(summary_lines)
-        else:
-            msg = "No active listening ports detected."
+        sorted_ports = sorted(ports_seen.values(), key=lambda x: x["port"])
 
         return {
             "success": True,
-            "count": len(ports),
-            "ports": ports,
-            "message": msg
+            "count": len(sorted_ports),
+            "ports": sorted_ports,
+            "message": f"Found {len(sorted_ports)} listening port(s): " + ", ".join(f":{p['port']} ({p['process_name']})" for p in sorted_ports[:10]) + (" ..." if len(sorted_ports) > 10 else "")
         }
     except Exception as err:
         return {
             "success": False,
-            "count": 0,
             "ports": [],
-            "message": f"Failed to retrieve listening ports: {err}"
+            "message": f"Failed to inspect network ports: {err}"
         }
 
 
 def what_is_using_port(port: int | str) -> dict:
     """
-    Identifies which application/PID is using a specific port.
+    Identifies which process and PID is actively using a given port number.
     """
     try:
-        port_num = int(str(port).strip())
+        port_num = int(port)
+        if not (1 <= port_num <= 65535):
+            return {"success": False, "message": f"Port number out of range (1-65535): {port_num}."}
     except (ValueError, TypeError):
-        return {
-            "success": False,
-            "port": 0,
-            "in_use": False,
-            "message": f"Invalid port number: '{port}'."
-        }
+        return {"success": False, "message": f"Invalid port number: '{port}'."}
 
-    listening_result = get_listening_ports()
-    if not listening_result.get("success"):
-        return {
-            "success": False,
-            "port": port_num,
-            "in_use": False,
-            "message": listening_result.get("message", "Failed to query network ports.")
-        }
+    all_ports = get_listening_ports()
+    if not all_ports.get("success"):
+        return all_ports
 
-    matched = [p for p in listening_result.get("ports", []) if p["port"] == port_num]
-
-    if matched:
-        first = matched[0]
-        proc = first["process_name"]
-        pid = first["pid"]
-        proto = first["protocol"]
-        return {
-            "success": True,
-            "port": port_num,
-            "in_use": True,
-            "protocol": proto,
-            "pid": pid,
-            "process_name": proc,
-            "message": f"Port {port_num} is in use by {proc} (PID {pid}, {proto})."
-        }
+    for p in all_ports.get("ports", []):
+        if p["port"] == port_num:
+            return {
+                "success": True,
+                "in_use": True,
+                "port": port_num,
+                "process_name": p.get("process_name", "Unknown"),
+                "pid": p.get("pid", 0),
+                "protocol": p.get("protocol", "TCP"),
+                "address": p.get("address", "0.0.0.0"),
+                "message": f"Port {port_num} is IN USE by '{p.get('process_name', 'Unknown')}' (PID: {p.get('pid', 0)})."
+            }
 
     return {
         "success": True,
-        "port": port_num,
         "in_use": False,
-        "pid": None,
+        "port": port_num,
         "process_name": None,
-        "message": f"Port {port_num} is not in use."
+        "pid": None,
+        "message": f"Port {port_num} is FREE (no active listening process)."
     }
 
 
 def is_port_free(port: int | str) -> dict:
     """
-    Checks if a local TCP port is available to be bound.
+    Checks whether a port is free to bind.
     """
     try:
-        port_num = int(str(port).strip())
-        if port_num < 1 or port_num > 65535:
-            raise ValueError()
+        port_num = int(port)
+        if not (1 <= port_num <= 65535):
+            return {"success": False, "message": f"Port number out of range (1-65535): {port_num}."}
     except (ValueError, TypeError):
+        return {"success": False, "message": f"Invalid port number: '{port}'."}
+
+    res = what_is_using_port(port)
+    if not res.get("success"):
+        return res
+
+    free = not res.get("in_use", True)
+    return {
+        "success": True,
+        "port": res.get("port"),
+        "free": free,
+        "message": f"Port {res.get('port')} is {'FREE' if free else 'BUSY'}."
+    }
+
+
+def kill_port_process(port: int | str) -> dict:
+    """
+    Kills the process occupying a specific port number to resolve port collision errors.
+    """
+    usage = what_is_using_port(port)
+    if not usage.get("success"):
+        return usage
+
+    if not usage.get("in_use"):
         return {
-            "success": False,
-            "port": 0,
-            "free": False,
-            "message": f"Invalid port number: '{port}'. Valid ports are 1–65535."
+            "success": True,
+            "port": usage.get("port"),
+            "message": f"Port {usage.get('port')} is already free."
         }
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(0.5)
+    pid = usage.get("pid")
+    pname = usage.get("process_name")
+    if not pid or pid == 0:
+        return {"success": False, "message": f"Cannot kill system process on port {usage.get('port')}."}
+
     try:
-        sock.bind(("127.0.0.1", port_num))
-        is_free = True
-    except OSError:
-        is_free = False
-    finally:
-        sock.close()
-
-    if is_free:
+        subprocess.check_output(["taskkill", "/F", "/PID", str(pid)], stderr=subprocess.STDOUT)
         return {
             "success": True,
-            "port": port_num,
-            "free": True,
-            "message": f"Port {port_num} is free."
+            "port": usage.get("port"),
+            "pid": pid,
+            "process_name": pname,
+            "message": f"Successfully killed '{pname}' (PID: {pid}) occupying port {usage.get('port')}."
         }
-    else:
-        # Check what is using it for helpful context
-        detail = what_is_using_port(port_num)
-        proc_str = f" by {detail.get('process_name')}" if detail.get("in_use") and detail.get("process_name") else ""
+    except Exception as err:
+        return {"success": False, "message": f"Failed to terminate process on port {usage.get('port')}: {err}"}
+
+
+def scan_remote_port(host: str, port: int, timeout_sec: float = 1.0) -> dict:
+    """
+    Probes whether a port is open on a target host.
+    """
+    try:
+        p_num = int(port)
+    except (ValueError, TypeError):
+        return {"success": False, "message": f"Invalid port: {port}"}
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout_sec)
+    try:
+        s.connect((host, p_num))
+        s.close()
         return {
             "success": True,
-            "port": port_num,
-            "free": False,
-            "message": f"Port {port_num} is currently in use{proc_str}."
+            "host": host,
+            "port": p_num,
+            "open": True,
+            "is_open": True,
+            "message": f"{host}:{p_num} is OPEN."
+        }
+    except Exception:
+        return {
+            "success": True,
+            "host": host,
+            "port": p_num,
+            "open": False,
+            "is_open": False,
+            "message": f"{host}:{p_num} is CLOSED or filtered."
         }

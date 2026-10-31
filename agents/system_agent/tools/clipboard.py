@@ -4,112 +4,157 @@ from ctypes import wintypes
 try:
     user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
-
-    kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
-    kernel32.GlobalAlloc.restype = ctypes.c_void_p
-    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
-    kernel32.GlobalLock.restype = ctypes.c_void_p
-    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
-    kernel32.GlobalUnlock.restype = wintypes.BOOL
-
     user32.OpenClipboard.argtypes = [wintypes.HWND]
     user32.OpenClipboard.restype = wintypes.BOOL
+    user32.CloseClipboard.argtypes = []
     user32.CloseClipboard.restype = wintypes.BOOL
+    user32.EmptyClipboard.argtypes = []
     user32.EmptyClipboard.restype = wintypes.BOOL
     user32.GetClipboardData.argtypes = [wintypes.UINT]
-    user32.GetClipboardData.restype = ctypes.c_void_p
-    user32.SetClipboardData.argtypes = [wintypes.UINT, ctypes.c_void_p]
-    user32.SetClipboardData.restype = ctypes.c_void_p
+    user32.GetClipboardData.restype = wintypes.HANDLE
+    user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+    user32.SetClipboardData.restype = wintypes.HANDLE
+    user32.EnumClipboardFormats.argtypes = [wintypes.UINT]
+    user32.EnumClipboardFormats.restype = wintypes.UINT
+    kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+    kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+    kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalUnlock.restype = wintypes.BOOL
 except AttributeError:
     user32 = None
     kernel32 = None
 
+CF_TEXT = 1
+CF_BITMAP = 2
+CF_HDROP = 15
 CF_UNICODETEXT = 13
 GMEM_MOVEABLE = 0x0002
-GMEM_ZEROINIT = 0x0040
+
+CLIPBOARD_FORMAT_NAMES = {
+    1: "CF_TEXT",
+    2: "CF_BITMAP",
+    13: "CF_UNICODETEXT",
+    15: "CF_HDROP (Files)",
+    16: "CF_LOCALE",
+}
 
 
 def get_clipboard_text() -> dict:
-    """Reads UTF-16 Unicode text currently stored in the Windows clipboard."""
+    """Reads current UTF-16 text from the Windows system clipboard."""
     if not user32 or not kernel32:
-        return {"success": False, "text": "", "message": "Windows API unavailable."}
+        return {"success": False, "text": "", "message": "user32/kernel32 is unavailable."}
 
-    if not user32.OpenClipboard(0):
-        return {"success": False, "text": "", "message": "Failed to open clipboard."}
+    if not user32.OpenClipboard(None):
+        return {"success": False, "text": "", "message": "Could not open system clipboard."}
 
     try:
-        h_mem = user32.GetClipboardData(CF_UNICODETEXT)
-        if not h_mem:
-            return {"success": True, "text": "", "message": "Clipboard is empty."}
+        h_clip = user32.GetClipboardData(CF_UNICODETEXT)
+        if not h_clip:
+            return {"success": True, "text": "", "message": "Clipboard is empty or does not contain text."}
 
-        ptr = kernel32.GlobalLock(h_mem)
-        if not ptr:
-            return {"success": False, "text": "", "message": "Failed to lock clipboard memory."}
+        p_data = kernel32.GlobalLock(h_clip)
+        if not p_data:
+            return {"success": False, "text": "", "message": "Could not lock clipboard memory."}
 
         try:
-            val = ctypes.c_wchar_p(ptr).value or ""
+            text = ctypes.wstring_at(p_data)
+            preview = text[:80] + "..." if len(text) > 80 else text
             return {
                 "success": True,
-                "text": val,
-                "length": len(val),
-                "message": f"Clipboard text ({len(val)} chars):\n{val[:300]}{'...' if len(val) > 300 else ''}" if val else "Clipboard is empty."
+                "text": text,
+                "length": len(text),
+                "message": f"Clipboard content ({len(text)} chars): \"{preview}\""
             }
         finally:
-            kernel32.GlobalUnlock(h_mem)
+            kernel32.GlobalUnlock(h_clip)
     finally:
         user32.CloseClipboard()
 
 
 def set_clipboard_text(text: str) -> dict:
-    """Copies text to the Windows clipboard."""
-    if text is None:
-        return {"success": False, "message": "Cannot copy None to clipboard."}
-
+    """Writes UTF-16 text to the Windows system clipboard."""
     if not user32 or not kernel32:
-        return {"success": False, "message": "Windows API unavailable."}
+        return {"success": False, "message": "user32/kernel32 is unavailable."}
 
-    content_str = str(text)
+    clean_text = text if isinstance(text, str) else str(text)
+    encoded = (clean_text + "\0").encode("utf-16-le")
+    byte_len = len(encoded)
 
-    if not user32.OpenClipboard(0):
-        return {"success": False, "message": "Failed to open clipboard."}
+    h_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, byte_len)
+    if not h_mem:
+        return {"success": False, "message": "Could not allocate global memory."}
+
+    p_mem = kernel32.GlobalLock(h_mem)
+    if not p_mem:
+        return {"success": False, "message": "Could not lock global memory."}
+
+    ctypes.memmove(p_mem, encoded, byte_len)
+    kernel32.GlobalUnlock(h_mem)
+
+    if not user32.OpenClipboard(None):
+        return {"success": False, "message": "Could not open system clipboard."}
 
     try:
         user32.EmptyClipboard()
-        encoded = (content_str + "\0").encode("utf-16le")
-        h_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, len(encoded))
-        if not h_mem:
-            return {"success": False, "message": "GlobalAlloc memory allocation failed."}
-
-        ptr = kernel32.GlobalLock(h_mem)
-        if not ptr:
-            return {"success": False, "message": "GlobalLock failed."}
-
-        try:
-            ctypes.memmove(ptr, encoded, len(encoded))
-        finally:
-            kernel32.GlobalUnlock(h_mem)
-
         user32.SetClipboardData(CF_UNICODETEXT, h_mem)
+        preview = clean_text[:80] + "..." if len(clean_text) > 80 else clean_text
         return {
             "success": True,
-            "text": content_str,
-            "length": len(content_str),
-            "message": f"Copied {len(content_str)} characters to clipboard."
+            "text": clean_text,
+            "length": len(clean_text),
+            "message": f"Copied {len(clean_text)} character(s) to clipboard: \"{preview}\""
         }
     finally:
         user32.CloseClipboard()
 
 
-def clear_clipboard() -> dict:
-    """Empties all contents from the Windows clipboard."""
-    if not user32:
-        return {"success": False, "message": "Windows API unavailable."}
+def append_clipboard_text(text: str, separator: str = "\n") -> dict:
+    """Appends text to current clipboard content without replacing it."""
+    curr = get_clipboard_text()
+    existing = curr.get("text", "")
+    new_combined = f"{existing}{separator}{text}" if existing else text
+    return set_clipboard_text(new_combined)
 
-    if not user32.OpenClipboard(0):
-        return {"success": False, "message": "Failed to open clipboard."}
+
+def clear_clipboard() -> dict:
+    """Empties all contents currently stored in the system clipboard."""
+    if not user32:
+        return {"success": False, "message": "user32 is unavailable."}
+
+    if not user32.OpenClipboard(None):
+        return {"success": False, "message": "Could not open system clipboard."}
 
     try:
         user32.EmptyClipboard()
         return {"success": True, "message": "Clipboard cleared successfully."}
+    finally:
+        user32.CloseClipboard()
+
+
+def get_clipboard_formats() -> dict:
+    """Lists all data formats currently stored in the system clipboard."""
+    if not user32:
+        return {"success": False, "message": "user32 is unavailable."}
+
+    if not user32.OpenClipboard(None):
+        return {"success": False, "message": "Could not open system clipboard."}
+
+    formats = []
+    try:
+        fmt = user32.EnumClipboardFormats(0)
+        while fmt != 0:
+            name = CLIPBOARD_FORMAT_NAMES.get(fmt, f"Format_{fmt}")
+            formats.append({"id": fmt, "name": name})
+            fmt = user32.EnumClipboardFormats(fmt)
+
+        return {
+            "success": True,
+            "count": len(formats),
+            "format_count": len(formats),
+            "formats": formats,
+            "message": f"Active clipboard formats: {', '.join(f['name'] for f in formats) if formats else 'Empty'}"
+        }
     finally:
         user32.CloseClipboard()

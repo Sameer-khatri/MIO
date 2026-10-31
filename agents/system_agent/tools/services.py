@@ -163,3 +163,56 @@ def restart_service(service_name: str) -> dict:
         "name": service_name,
         "message": f"Restarted '{service_name}'." if start_res.get("success") else f"Stop: {stop_res.get('message')} | Start: {start_res.get('message')}"
     }
+
+
+def set_service_startup(service_name: str, startup_type: str = "auto") -> dict:
+    """
+    Sets the Windows service startup type: 'auto', 'demand' (manual), or 'disabled'.
+    """
+    clean_name = service_name.strip()
+    norm_type = startup_type.strip().lower()
+    valid_types = {"auto": "auto", "manual": "demand", "demand": "demand", "disabled": "disabled"}
+    if norm_type not in valid_types:
+        return {"success": False, "message": f"Invalid startup type '{startup_type}'. Use auto, manual, or disabled."}
+
+    sc_type = valid_types[norm_type]
+    try:
+        subprocess.check_output(
+            ["sc.exe", "config", clean_name, f"start=", sc_type],
+            stderr=subprocess.STDOUT,
+            text=True
+        )
+        return {
+            "success": True,
+            "name": clean_name,
+            "startup_type": norm_type,
+            "message": f"Set startup type for '{clean_name}' to {norm_type.upper()}."
+        }
+    except subprocess.CalledProcessError as err:
+        return {"success": False, "message": f"Failed to configure service startup: {err.output.strip() if err.output else err}"}
+
+
+def get_service_description(service_name: str) -> dict:
+    """Retrieves the official description of a Windows service."""
+    clean_name = service_name.strip()
+    try:
+        output = subprocess.check_output(
+            ["sc.exe", "qdescription", clean_name],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="ignore"
+        )
+        desc = ""
+        for line in output.splitlines():
+            if "DESCRIPTION:" in line:
+                desc = line.split("DESCRIPTION:", 1)[1].strip()
+                break
+        return {
+            "success": True,
+            "name": clean_name,
+            "description": desc or "No description provided.",
+            "message": f"{clean_name}: {desc or 'No description provided.'}"
+        }
+    except Exception as err:
+        return {"success": False, "message": f"Could not get description for '{clean_name}': {err}"}
