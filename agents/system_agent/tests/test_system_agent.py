@@ -1891,9 +1891,284 @@ class TestSystemAgent(unittest.TestCase):
             self.assertTrue(cont)
             self.assertEqual(msg, "Timer started")
 
+    # -------------------------------------------------------------------------
+    # Tests for Brightness Hands
+    # -------------------------------------------------------------------------
+
+    def test_brightness_query_and_set(self):
+        from tools.brightness import get_brightness, set_brightness, increase_brightness, decrease_brightness
+        with patch("tools.brightness.subprocess.check_output", return_value="65"):
+            res = get_brightness()
+            self.assertTrue(res["success"])
+            self.assertEqual(res["brightness"], 65)
+
+        with patch("tools.brightness.subprocess.check_output", return_value=""):
+            set_res = set_brightness(80)
+            self.assertTrue(set_res["success"])
+            self.assertEqual(set_res["brightness"], 80)
+
+        with patch("tools.brightness.get_brightness", return_value={"success": True, "brightness": 50}), \
+             patch("tools.brightness.set_brightness", return_value={"success": True, "brightness": 60}) as mock_set:
+            inc_res = increase_brightness(10)
+            self.assertTrue(inc_res["success"])
+            mock_set.assert_called_once_with(60)
+
+        with patch("tools.brightness.get_brightness", return_value={"success": True, "brightness": 50}), \
+             patch("tools.brightness.set_brightness", return_value={"success": True, "brightness": 40}) as mock_set:
+            dec_res = decrease_brightness(10)
+            self.assertTrue(dec_res["success"])
+            mock_set.assert_called_once_with(40)
+
+    # -------------------------------------------------------------------------
+    # Tests for Wi-Fi Tools & DNS
+    # -------------------------------------------------------------------------
+
+    def test_wifi_tools(self):
+        from tools.wifi_tools import get_saved_wifi_profiles, get_wifi_password, scan_wifi_networks, flush_dns_cache
+
+        fake_profiles = (
+            "Profiles on interface Wi-Fi:\n"
+            "    All User Profile     : HomeNetwork\n"
+            "    All User Profile     : OfficeGuest\n"
+        )
+        with patch("tools.wifi_tools.subprocess.check_output", return_value=fake_profiles):
+            res_profiles = get_saved_wifi_profiles()
+            self.assertTrue(res_profiles["success"])
+            self.assertEqual(res_profiles["count"], 2)
+            self.assertIn("HomeNetwork", res_profiles["profiles"])
+
+        fake_key = (
+            "Security settings\n"
+            "    Key Content            : SuperSecret123\n"
+        )
+        with patch("tools.wifi_tools.subprocess.check_output", return_value=fake_key):
+            res_pwd = get_wifi_password("HomeNetwork")
+            self.assertTrue(res_pwd["success"])
+            self.assertEqual(res_pwd["password"], "SuperSecret123")
+
+        fake_scan = (
+            "SSID 1 : CafeWiFi\n"
+            "    Network type            : Infrastructure\n"
+            "    Signal                  : 85%\n"
+        )
+        with patch("tools.wifi_tools.subprocess.check_output", return_value=fake_scan):
+            res_scan = scan_wifi_networks()
+            self.assertTrue(res_scan["success"])
+            self.assertEqual(res_scan["count"], 1)
+            self.assertEqual(res_scan["networks"][0]["ssid"], "CafeWiFi")
+
+        with patch("tools.wifi_tools.subprocess.check_output", return_value="Successfully flushed the DNS Resolver Cache."):
+            res_flush = flush_dns_cache()
+            self.assertTrue(res_flush["success"])
+
+    # -------------------------------------------------------------------------
+    # Tests for Windows Services
+    # -------------------------------------------------------------------------
+
+    def test_services_management(self):
+        from tools.services import list_services, get_service_status, start_service, stop_service, restart_service
+
+        fake_sc = (
+            "SERVICE_NAME: Spooler\n"
+            "DISPLAY_NAME: Print Spooler\n"
+            "        STATE              : 4  RUNNING\n"
+            "SERVICE_NAME: wuauserv\n"
+            "DISPLAY_NAME: Windows Update\n"
+            "        STATE              : 1  STOPPED\n"
+        )
+        with patch("tools.services.subprocess.check_output", return_value=fake_sc):
+            res_list = list_services()
+            self.assertTrue(res_list["success"])
+            self.assertEqual(res_list["count"], 2)
+            self.assertEqual(res_list["services"][0]["name"], "Spooler")
+            self.assertEqual(res_list["services"][0]["state"], "RUNNING")
+
+        fake_single = (
+            "SERVICE_NAME: Spooler\n"
+            "        STATE              : 4  RUNNING\n"
+        )
+        with patch("tools.services.subprocess.check_output", return_value=fake_single):
+            status_res = get_service_status("Spooler")
+            self.assertTrue(status_res["success"])
+            self.assertTrue(status_res["running"])
+            self.assertEqual(status_res["state"], "RUNNING")
+
+        with patch("tools.services.subprocess.check_output", return_value="SERVICE_START_PENDING"):
+            start_res = start_service("Spooler")
+            self.assertTrue(start_res["success"])
+
+        with patch("tools.services.subprocess.check_output", return_value="STOP_PENDING"):
+            stop_res = stop_service("Spooler")
+            self.assertTrue(stop_res["success"])
+
+    # -------------------------------------------------------------------------
+    # Tests for Installed Software
+    # -------------------------------------------------------------------------
+
+    def test_installed_software(self):
+        from tools.installed_apps import list_installed_software, get_app_version
+        with patch("tools.installed_apps.winreg.OpenKey"), \
+             patch("tools.installed_apps.winreg.QueryInfoKey", return_value=(1, 0, 0)), \
+             patch("tools.installed_apps.winreg.EnumKey", return_value="NodeJS"), \
+             patch("tools.installed_apps.winreg.QueryValueEx", side_effect=lambda key, val: ("Node.js", 1) if val == "DisplayName" else ("20.10.0", 1) if val == "DisplayVersion" else ("OpenJS", 1)):
+            res = list_installed_software()
+            self.assertTrue(res["success"])
+            self.assertGreaterEqual(res["count"], 1)
+
+            ver_res = get_app_version("Node.js")
+            self.assertTrue(ver_res["success"])
+            self.assertEqual(ver_res["version"], "20.10.0")
+
+    # -------------------------------------------------------------------------
+    # Tests for Hasher Checksums
+    # -------------------------------------------------------------------------
+
+    def test_hasher_checksums(self):
+        from tools.hasher import hash_file, verify_checksum
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fpath = os.path.join(tmpdir, "test.bin")
+            with open(fpath, "wb") as f:
+                f.write(b"MIO Super Agent Test")
+
+            sha_res = hash_file(fpath, "sha256")
+            self.assertTrue(sha_res["success"])
+            self.assertEqual(len(sha_res["hash"]), 64)
+
+            md5_res = hash_file(fpath, "md5")
+            self.assertTrue(md5_res["success"])
+            self.assertEqual(len(md5_res["hash"]), 32)
+
+            verify_res = verify_checksum(fpath, sha_res["hash"])
+            self.assertTrue(verify_res["success"])
+            self.assertTrue(verify_res["matches"])
+
+    # -------------------------------------------------------------------------
+    # Tests for Display Metrics
+    # -------------------------------------------------------------------------
+
+    def test_display_metrics(self):
+        from tools.display import get_display_info
+        with patch("tools.display.user32.GetSystemMetrics", side_effect=lambda x: 1920 if x == 0 else 1080 if x == 1 else 1 if x == 80 else 1920 if x == 78 else 1080), \
+             patch("tools.display.user32.GetDpiForSystem", return_value=96, create=True):
+            res = get_display_info()
+            self.assertTrue(res["success"])
+            self.assertEqual(res["primary_resolution"], "1920x1080")
+            self.assertEqual(res["scaling_percent"], 100)
+
+    # -------------------------------------------------------------------------
+    # Tests for Storage Drives
+    # -------------------------------------------------------------------------
+
+    def test_storage_drives(self):
+        from tools.drives import list_drives, get_removable_drives
+        with patch("tools.drives.kernel32.GetDriveTypeW", side_effect=lambda r: 3 if r == "C:\\" else 2 if r == "E:\\" else 1), \
+             patch("tools.drives.kernel32.GetVolumeInformationW", return_value=1), \
+             patch("tools.drives.shutil.disk_usage", return_value=type("obj", (), {"total": 500*1024**3, "free": 200*1024**3})()):
+            res = list_drives()
+            self.assertTrue(res["success"])
+            self.assertEqual(res["count"], 2)
+
+            rem_res = get_removable_drives()
+            self.assertTrue(rem_res["success"])
+            self.assertEqual(rem_res["count"], 1)
+            self.assertEqual(rem_res["drives"][0]["letter"], "E")
+
+    # -------------------------------------------------------------------------
+    # Tests for Agent Command Routing for 7 New Tools
+    # -------------------------------------------------------------------------
+
+    def test_agent_extended_hands_command_routing(self):
+        from agent import handle_command
+
+        with patch("agent.get_brightness", return_value={"message": "Brightness: 70%"}):
+            cont, msg = handle_command("show brightness")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Brightness: 70%")
+
+        with patch("agent.set_brightness", return_value={"message": "Brightness set to 80%"}):
+            cont, msg = handle_command("set brightness 80%")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Brightness set to 80%")
+
+        with patch("agent.increase_brightness", return_value={"message": "Brightness increased"}):
+            cont, msg = handle_command("brightness up")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Brightness increased")
+
+        with patch("agent.decrease_brightness", return_value={"message": "Brightness decreased"}):
+            cont, msg = handle_command("dim screen")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Brightness decreased")
+
+        with patch("agent.get_saved_wifi_profiles", return_value={"message": "Saved Wi-Fi list"}):
+            cont, msg = handle_command("show saved wifi")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Saved Wi-Fi list")
+
+        with patch("agent.get_wifi_password", return_value={"message": "Password is secret"}):
+            cont, msg = handle_command("wifi password for HomeNetwork")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Password is secret")
+
+        with patch("agent.flush_dns_cache", return_value={"message": "DNS flushed"}):
+            cont, msg = handle_command("flush dns")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "DNS flushed")
+
+        with patch("agent.list_services", return_value={"message": "Services list"}):
+            cont, msg = handle_command("list services")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Services list")
+
+        with patch("agent.start_service", return_value={"message": "Started Spooler"}):
+            cont, msg = handle_command("start service Spooler")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Started Spooler")
+
+        with patch("agent.stop_service", return_value={"message": "Stopped Spooler"}):
+            cont, msg = handle_command("stop service Spooler")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Stopped Spooler")
+
+        with patch("agent.restart_service", return_value={"message": "Restarted Spooler"}):
+            cont, msg = handle_command("restart service Spooler")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Restarted Spooler")
+
+        with patch("agent.get_app_version", return_value={"message": "Node.js v20"}):
+            cont, msg = handle_command("app version Node.js")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Node.js v20")
+
+        with patch("agent.hash_file", return_value={"message": "SHA256: 12345"}):
+            cont, msg = handle_command("sha256 app.exe")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "SHA256: 12345")
+
+        with patch("agent.verify_checksum", return_value={"message": "Checksum MATCHES!"}):
+            cont, msg = handle_command("verify checksum app.zip 12345")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Checksum MATCHES!")
+
+        with patch("agent.get_display_info", return_value={"message": "Display 1920x1080"}):
+            cont, msg = handle_command("screen resolution")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Display 1920x1080")
+
+        with patch("agent.list_drives", return_value={"message": "Drives list"}):
+            cont, msg = handle_command("show drives")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Drives list")
+
+        with patch("agent.get_removable_drives", return_value={"message": "USB drives list"}):
+            cont, msg = handle_command("show usb drives")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "USB drives list")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

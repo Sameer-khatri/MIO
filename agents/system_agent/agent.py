@@ -117,6 +117,41 @@ from tools.timer import (
     start_timer,
     list_active_timers,
 )
+from tools.brightness import (
+    get_brightness,
+    set_brightness,
+    increase_brightness,
+    decrease_brightness,
+)
+from tools.wifi_tools import (
+    get_saved_wifi_profiles,
+    get_wifi_password,
+    scan_wifi_networks,
+    flush_dns_cache,
+)
+from tools.services import (
+    list_services,
+    get_service_status,
+    start_service,
+    stop_service,
+    restart_service,
+)
+from tools.installed_apps import (
+    list_installed_software,
+    get_app_version,
+)
+from tools.hasher import (
+    hash_file,
+    verify_checksum,
+)
+from tools.display import (
+    get_display_info,
+)
+from tools.drives import (
+    list_drives,
+    get_removable_drives,
+)
+
 
 
 
@@ -465,6 +500,133 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     if lower_input in ("show timers", "active timers", "list timers"):
         res = list_active_timers()
         return True, res.get("message")
+
+    # 16. Display Brightness Hands
+    if lower_input in ("show brightness", "brightness", "get brightness"):
+        res = get_brightness()
+        return True, res.get("message")
+    bright_match = re.search(r"^(set brightness to|set brightness|brightness)\s+(\d+)\%?$", lower_input)
+    if bright_match:
+        res = set_brightness(bright_match.group(2))
+        return True, res.get("message")
+    if lower_input in ("brightness up", "increase brightness", "brighter"):
+        res = increase_brightness()
+        return True, res.get("message")
+    if lower_input in ("brightness down", "decrease brightness", "dim screen", "dim brightness"):
+        res = decrease_brightness()
+        return True, res.get("message")
+
+    # 17. Wi-Fi Tools & DNS
+    if lower_input in ("show saved wifi", "saved wifi", "wifi profiles", "list wifi profiles", "show wifi profiles"):
+        res = get_saved_wifi_profiles()
+        return True, res.get("message")
+    if lower_input.startswith("wifi password for ") or lower_input.startswith("wifi password "):
+        ssid_name = re.sub(r"^(wifi password for|wifi password)\s+", "", cleaned, flags=re.I).strip()
+        res = get_wifi_password(ssid_name)
+        return True, res.get("message")
+    if lower_input in ("scan wifi", "scan networks", "available wifi", "show available wifi", "nearby wifi"):
+        res = scan_wifi_networks()
+        if res.get("success"):
+            networks = res.get("networks", [])
+            lines = [res.get("message", "")]
+            for n in networks[:12]:
+                lines.append(f"  - {n.get('ssid')} (Signal: {n.get('signal')})")
+            if len(networks) > 12:
+                lines.append(f"  ... and {len(networks) - 12} more networks.")
+            return True, "\n".join(lines)
+        return True, res.get("message")
+    if lower_input in ("flush dns", "flush dns cache", "clear dns", "clear dns cache"):
+        res = flush_dns_cache()
+        return True, res.get("message")
+
+    # 18. Windows Services Management
+    if lower_input.startswith("restart service "):
+        svc = cleaned[16:].strip()
+        res = restart_service(svc)
+        return True, res.get("message")
+    if lower_input.startswith("start service "):
+        svc = cleaned[14:].strip()
+        res = start_service(svc)
+        return True, res.get("message")
+    if lower_input.startswith("stop service "):
+        svc = cleaned[13:].strip()
+        res = stop_service(svc)
+        return True, res.get("message")
+    if lower_input.startswith("service status ") or lower_input.startswith("status of service "):
+        svc = re.sub(r"^(service status|status of service)\s+", "", cleaned, flags=re.I).strip()
+        res = get_service_status(svc)
+        return True, res.get("message")
+    if lower_input.startswith("list services") or lower_input.startswith("show services"):
+        filt = re.sub(r"^(list services|show services)\s*", "", cleaned, flags=re.I).strip()
+        res = list_services(filt)
+        if res.get("success"):
+            services = res.get("services", [])
+            lines = [res.get("message", "")]
+            for s in services[:15]:
+                lines.append(f"  - [{s.get('state')}] {s.get('name')} ({s.get('display_name')})")
+            if len(services) > 15:
+                lines.append(f"  ... and {len(services) - 15} more services.")
+            return True, "\n".join(lines)
+        return True, res.get("message")
+
+    # 19. Installed Software Inventory
+    if lower_input.startswith("app version ") or lower_input.startswith("version of "):
+        app_q = re.sub(r"^(app version|version of)\s+", "", cleaned, flags=re.I).strip()
+        res = get_app_version(app_q)
+        return True, res.get("message")
+    if lower_input.startswith("installed software") or lower_input.startswith("show installed apps") or lower_input.startswith("list installed apps") or lower_input.startswith("installed apps"):
+        app_q = re.sub(r"^(installed software|show installed apps|list installed apps|installed apps)\s*", "", cleaned, flags=re.I).strip()
+        res = list_installed_software(app_q)
+        if res.get("success"):
+            apps = res.get("apps", [])
+            lines = [res.get("message", "")]
+            for a in apps[:15]:
+                lines.append(f"  - {a.get('name')} v{a.get('version')} ({a.get('publisher')})")
+            if len(apps) > 15:
+                lines.append(f"  ... and {len(apps) - 15} more applications.")
+            return True, "\n".join(lines)
+        return True, res.get("message")
+
+    # 20. Cryptographic File Hashes & Checksums
+    if lower_input.startswith("verify checksum "):
+        remainder = cleaned[16:].strip()
+        parts = remainder.split(maxsplit=1)
+        if len(parts) == 2:
+            res = verify_checksum(parts[0], parts[1])
+            return True, res.get("message")
+        return True, "Please provide file path and expected hash. Example: 'verify checksum app.zip a1b2c3...'"
+    if lower_input.startswith("sha256 ") or lower_input.startswith("hash sha256 "):
+        f_path = re.sub(r"^(sha256|hash sha256)\s+", "", cleaned, flags=re.I).strip()
+        res = hash_file(f_path, "sha256")
+        return True, res.get("message")
+    if lower_input.startswith("md5 ") or lower_input.startswith("hash md5 "):
+        f_path = re.sub(r"^(md5|hash md5)\s+", "", cleaned, flags=re.I).strip()
+        res = hash_file(f_path, "md5")
+        return True, res.get("message")
+    if lower_input.startswith("hash file ") or lower_input.startswith("hash "):
+        remainder = re.sub(r"^(hash file|hash)\s+", "", cleaned, flags=re.I).strip()
+        parts = remainder.split()
+        if len(parts) >= 2 and parts[-1].lower() in ("sha256", "md5", "sha1", "sha512"):
+            f_path = " ".join(parts[:-1])
+            algo = parts[-1]
+            res = hash_file(f_path, algo)
+        else:
+            res = hash_file(remainder, "sha256")
+        return True, res.get("message")
+
+    # 21. Display & Multi-Monitor Metrics
+    if lower_input in ("show display info", "display info", "screen resolution", "display resolution", "resolution", "monitors", "show monitors"):
+        res = get_display_info()
+        return True, res.get("message")
+
+    # 22. Storage Drives & Removable USBs
+    if lower_input in ("show usb drives", "usb drives", "removable drives", "show removable drives", "list usb"):
+        res = get_removable_drives()
+        return True, res.get("message")
+    if lower_input in ("show drives", "list drives", "drives", "disk drives"):
+        res = list_drives()
+        return True, res.get("message")
+
 
 
     # 10. System Information commands
