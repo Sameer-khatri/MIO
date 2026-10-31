@@ -55,6 +55,36 @@ from tools.network import (
     is_connected_to_internet,
     ping_host,
 )
+from tools.audio import (
+    set_volume,
+    volume_up,
+    volume_down,
+    toggle_mute,
+    media_play_pause,
+    media_next,
+    media_prev,
+    media_stop,
+)
+from tools.clipboard import (
+    get_clipboard_text,
+    set_clipboard_text,
+    clear_clipboard,
+)
+from tools.input import (
+    show_desktop,
+    open_task_manager,
+    switch_app_alt_tab,
+    send_hotkey,
+    type_text,
+)
+from tools.power import (
+    lock_workstation,
+    turn_off_screen,
+    get_battery_status,
+)
+from tools.screen import (
+    take_screenshot,
+)
 
 
 def extract_where_target(user_input: str) -> str | None:
@@ -178,7 +208,90 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
             return True, "No running applications found."
         return True, result.get("message", "Failed to inspect running applications.")
 
-    # 5. System Information commands
+    # 5. Media & Audio Hands
+    if lower_input in ("mute", "unmute", "toggle mute"):
+        res = toggle_mute()
+        return True, res.get("message")
+    if lower_input in ("volume up", "turn up volume", "increase volume"):
+        res = volume_up()
+        return True, res.get("message")
+    if lower_input in ("volume down", "turn down volume", "decrease volume"):
+        res = volume_down()
+        return True, res.get("message")
+    vol_match = re.search(r"^(set volume to|set volume|volume)\s+(\d+)\%?$", lower_input)
+    if vol_match:
+        res = set_volume(vol_match.group(2))
+        return True, res.get("message")
+    if lower_input in ("play", "pause", "play pause", "resume"):
+        res = media_play_pause()
+        return True, res.get("message")
+    if lower_input in ("next track", "skip track", "next song", "next"):
+        res = media_next()
+        return True, res.get("message")
+    if lower_input in ("previous track", "prev track", "previous song", "prev"):
+        res = media_prev()
+        return True, res.get("message")
+    if lower_input in ("stop media", "stop music", "stop playback"):
+        res = media_stop()
+        return True, res.get("message")
+
+    # 6. Clipboard Hands
+    if lower_input in ("show clipboard", "read clipboard", "get clipboard", "clipboard"):
+        res = get_clipboard_text()
+        return True, res.get("message")
+    if lower_input == "clear clipboard":
+        res = clear_clipboard()
+        return True, res.get("message")
+    if lower_input.startswith("copy to clipboard "):
+        text_to_copy = cleaned[18:].strip()
+        res = set_clipboard_text(text_to_copy)
+        return True, res.get("message")
+    if lower_input.startswith("copy text "):
+        text_to_copy = cleaned[10:].strip()
+        res = set_clipboard_text(text_to_copy)
+        return True, res.get("message")
+
+    # 7. Hotkeys & Input Hands
+    if lower_input in ("show desktop", "minimize all"):
+        res = show_desktop()
+        return True, res.get("message")
+    if lower_input in ("open task manager", "task manager"):
+        res = open_task_manager()
+        return True, res.get("message")
+    if lower_input in ("switch app", "alt tab", "switch application"):
+        res = switch_app_alt_tab()
+        return True, res.get("message")
+    if lower_input.startswith("type "):
+        text_to_type = cleaned[5:]
+        res = type_text(text_to_type)
+        return True, res.get("message")
+    if lower_input.startswith("press hotkey ") or lower_input.startswith("hotkey "):
+        raw_keys = re.sub(r"^(press hotkey|hotkey)\s+", "", cleaned, flags=re.I).strip()
+        parts = [p.strip() for p in re.split(r"[\+\s]+", raw_keys) if p.strip()]
+        res = send_hotkey(parts)
+        return True, res.get("message")
+
+    # 8. Power & Session Hands
+    if lower_input in ("lock screen", "lock workstation", "lock computer", "lock pc"):
+        res = lock_workstation()
+        return True, res.get("message")
+    if lower_input in ("turn off screen", "turn off monitor", "sleep monitor", "screen off"):
+        res = turn_off_screen()
+        return True, res.get("message")
+    if lower_input in ("show battery", "battery status", "battery", "power status", "show power"):
+        res = get_battery_status()
+        return True, res.get("message")
+
+    # 9. Screen Capture Hands
+    if lower_input in ("take screenshot", "screenshot", "capture screen"):
+        res = take_screenshot()
+        return True, res.get("message")
+    if lower_input.startswith("screenshot ") or lower_input.startswith("take screenshot "):
+        custom_name = re.sub(r"^(screenshot|take screenshot)\s+", "", cleaned, flags=re.I).strip()
+        res = take_screenshot(custom_name)
+        return True, res.get("message")
+
+    # 10. System Information commands
     if lower_input in ("show system info", "system info"):
         res = get_system_info()
         return True, res.get("message")
@@ -198,7 +311,7 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         res = get_gpu_usage()
         return True, res.get("message")
 
-    # 6. Ports commands
+    # 11. Ports commands
     if lower_input in ("show listening ports", "listening ports", "show ports", "ports"):
         res = get_listening_ports()
         return True, res.get("message")
@@ -212,7 +325,7 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
             res = is_port_free(match.group(1))
             return True, res.get("message")
 
-    # 7. Network commands
+    # 12. Network commands
     if lower_input in ("show network info", "network info", "network"):
         res = get_network_info()
         return True, res.get("message")
@@ -230,7 +343,7 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         res = ping_host(target_host)
         return True, res.get("message")
 
-    # 8. Window management commands
+    # 13. Window management commands
     if lower_input.startswith("minimize "):
         target_app = cleaned[9:].strip()
         res = minimize_window(target_app)
@@ -260,7 +373,7 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         res = list_windows()
         return True, res.get("message")
 
-    # 9. Application lifecycle: close & restart
+    # 14. Application lifecycle: close & restart
     if lower_input.startswith("close "):
         target_app = cleaned[6:].strip()
         res = close_application(target_app)
@@ -270,7 +383,7 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         res = restart_application(target_app)
         return True, res.get("message")
 
-    # 10. Filesystem: list, create, copy, move, rename, delete, find
+    # 15. Filesystem: list, create, copy, move, rename, delete, find
     if lower_input.startswith("show files in ") or lower_input.startswith("list files in "):
         folder_query = cleaned[14:].strip()
         if not folder_query:
@@ -347,7 +460,7 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
             return True, f"No matches found for '{query}'."
         return True, result.get("message", f"Failed to search for '{query}'.")
 
-    # 11. Open command handling
+    # 16. Open command handling
     if lower_input.startswith("open "):
         raw_target = cleaned[5:].strip()
         if not raw_target:
@@ -361,7 +474,7 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     if lower_input == "open":
         return True, "Please specify an application to open. Example: 'open calculator'"
 
-    return True, f"Unknown command: '{cleaned}'. Type 'open <app>', 'where is <tool>?', 'is <app> running?', 'show system info', 'show network info', 'show listening ports', 'close <app>', 'minimize <app>', 'delete <file>', etc."
+    return True, f"Unknown command: '{cleaned}'. Type 'open <app>', 'set volume <x>', 'take screenshot', 'show clipboard', 'show desktop', 'show battery', etc."
 
 
 def run_agent():

@@ -1392,7 +1392,201 @@ class TestSystemAgent(unittest.TestCase):
             self.assertTrue(cont)
             self.assertEqual(msg, "Deleted")
 
+    # -------------------------------------------------------------------------
+    # Tests for Audio & Media Hands
+    # -------------------------------------------------------------------------
+
+    def test_audio_controls(self):
+        from tools.audio import set_volume, volume_up, volume_down, toggle_mute, media_play_pause, media_next, media_prev, media_stop
+        with patch("tools.audio.user32.keybd_event"):
+            res = set_volume(50)
+            self.assertTrue(res["success"])
+            self.assertEqual(res["volume_percent"], 50)
+
+            up_res = volume_up(2)
+            self.assertTrue(up_res["success"])
+
+            down_res = volume_down(2)
+            self.assertTrue(down_res["success"])
+
+            mute_res = toggle_mute()
+            self.assertTrue(mute_res["success"])
+
+            play_res = media_play_pause()
+            self.assertTrue(play_res["success"])
+
+            next_res = media_next()
+            self.assertTrue(next_res["success"])
+
+            prev_res = media_prev()
+            self.assertTrue(prev_res["success"])
+
+            stop_res = media_stop()
+            self.assertTrue(stop_res["success"])
+
+        invalid = set_volume("invalid")
+        self.assertFalse(invalid["success"])
+
+    # -------------------------------------------------------------------------
+    # Tests for Clipboard Hands
+    # -------------------------------------------------------------------------
+
+    def test_clipboard_operations(self):
+        from tools.clipboard import get_clipboard_text, set_clipboard_text, clear_clipboard
+        with patch("tools.clipboard.user32.OpenClipboard", return_value=True), \
+             patch("tools.clipboard.user32.CloseClipboard", return_value=True), \
+             patch("tools.clipboard.user32.EmptyClipboard", return_value=True), \
+             patch("tools.clipboard.kernel32.GlobalAlloc", return_value=12345), \
+             patch("tools.clipboard.kernel32.GlobalLock", return_value=67890), \
+             patch("tools.clipboard.kernel32.GlobalUnlock", return_value=True), \
+             patch("tools.clipboard.user32.SetClipboardData", return_value=12345), \
+             patch("tools.clipboard.ctypes.memmove"):
+            set_res = set_clipboard_text("Hand Test Content")
+            self.assertTrue(set_res["success"])
+            self.assertEqual(set_res["text"], "Hand Test Content")
+
+            clear_res = clear_clipboard()
+            self.assertTrue(clear_res["success"])
+
+        with patch("tools.clipboard.user32.OpenClipboard", return_value=False):
+            err_set = set_clipboard_text("Fail")
+            self.assertFalse(err_set["success"])
+
+            err_get = get_clipboard_text()
+            self.assertFalse(err_get["success"])
+
+    # -------------------------------------------------------------------------
+    # Tests for Input & Hotkeys Hands
+    # -------------------------------------------------------------------------
+
+    def test_input_hotkeys_and_typing(self):
+        from tools.input import send_hotkey, show_desktop, open_task_manager, switch_app_alt_tab, type_text
+        with patch("tools.input.user32.keybd_event"):
+            desk = show_desktop()
+            self.assertTrue(desk["success"])
+
+            task = open_task_manager()
+            self.assertTrue(task["success"])
+
+            alt = switch_app_alt_tab()
+            self.assertTrue(alt["success"])
+
+            typed = type_text("Hello MIO")
+            self.assertTrue(typed["success"])
+            self.assertEqual(typed["length"], 9)
+
+            custom_combo = send_hotkey(["ctrl", "c"])
+            self.assertTrue(custom_combo["success"])
+
+        invalid_combo = send_hotkey(["unknown_key_12345"])
+        self.assertFalse(invalid_combo["success"])
+
+    # -------------------------------------------------------------------------
+    # Tests for Power & Battery Hands
+    # -------------------------------------------------------------------------
+
+    def test_power_and_battery(self):
+        from tools.power import lock_workstation, turn_off_screen, get_battery_status
+        with patch("tools.power.user32.LockWorkStation", return_value=1):
+            lock_res = lock_workstation()
+            self.assertTrue(lock_res["success"])
+
+        with patch("tools.power.user32.SendMessageW", return_value=0):
+            screen_res = turn_off_screen()
+            self.assertTrue(screen_res["success"])
+
+        with patch("tools.power.kernel32.GetSystemPowerStatus", return_value=1):
+            batt_res = get_battery_status()
+            self.assertTrue(batt_res["success"])
+            self.assertIn("Power Source", batt_res["message"])
+
+    # -------------------------------------------------------------------------
+    # Tests for Screen Capture Hands
+    # -------------------------------------------------------------------------
+
+    def test_screen_capture(self):
+        from tools.screen import take_screenshot
+        with patch("tools.screen.subprocess.check_output", return_value=b""), \
+             patch("tools.screen.os.path.exists", return_value=True), \
+             patch("tools.screen.os.path.getsize", return_value=10240):
+            shot = take_screenshot("shot.png")
+            self.assertTrue(shot["success"])
+            self.assertIn("shot.png", shot["path"])
+
+    # -------------------------------------------------------------------------
+    # Tests for Agent Hand Command Routing
+    # -------------------------------------------------------------------------
+
+    def test_agent_hand_commands(self):
+        from agent import handle_command
+
+        with patch("agent.set_volume", return_value={"message": "Volume 70%"}):
+            cont, msg = handle_command("set volume 70%")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Volume 70%")
+
+        with patch("agent.volume_up", return_value={"message": "Volume up"}):
+            cont, msg = handle_command("volume up")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Volume up")
+
+        with patch("agent.toggle_mute", return_value={"message": "Muted"}):
+            cont, msg = handle_command("mute")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Muted")
+
+        with patch("agent.media_play_pause", return_value={"message": "Play"}):
+            cont, msg = handle_command("play")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Play")
+
+        with patch("agent.media_next", return_value={"message": "Next"}):
+            cont, msg = handle_command("next track")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Next")
+
+        with patch("agent.get_clipboard_text", return_value={"message": "Clip: text"}):
+            cont, msg = handle_command("show clipboard")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Clip: text")
+
+        with patch("agent.set_clipboard_text", return_value={"message": "Copied"}):
+            cont, msg = handle_command("copy text https://github.com")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Copied")
+
+        with patch("agent.show_desktop", return_value={"message": "Desktop shown"}):
+            cont, msg = handle_command("show desktop")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Desktop shown")
+
+        with patch("agent.open_task_manager", return_value={"message": "Task Manager"}):
+            cont, msg = handle_command("open task manager")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Task Manager")
+
+        with patch("agent.lock_workstation", return_value={"message": "Locked"}):
+            cont, msg = handle_command("lock screen")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Locked")
+
+        with patch("agent.turn_off_screen", return_value={"message": "Screen off"}):
+            cont, msg = handle_command("turn off monitor")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Screen off")
+
+        with patch("agent.get_battery_status", return_value={"message": "Battery 85%"}):
+            cont, msg = handle_command("show battery")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Battery 85%")
+
+        with patch("agent.take_screenshot", return_value={"message": "Screenshot saved"}):
+            cont, msg = handle_command("take screenshot")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Screenshot saved")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
