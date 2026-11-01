@@ -1,3 +1,4 @@
+
 """
 Aegis - Standalone Laptop Doctor & Hardware Guardian for Windows.
 
@@ -924,26 +925,62 @@ def run_cli():
             elif lower_q in ("score", "health", "checkup", "vitals"):
                 res = doctor.full_checkup()
                 print(res["report_card"])
-            elif lower_q in ("scan", "virus", "antivirus", "check threats"):
-                print("\n[AEGIS SHIELD] Running deep system security and threat audit...")
-                sec = doctor.scan_threats()
-                print(sec["summary_report"])
-                print()
-            elif lower_q.startswith("scan "):
-                target_path = query[5:].strip().strip('"').strip("'")
-                print(f"\n[AEGIS SHIELD] Scanning target: '{target_path}'...")
-                if os.path.isdir(target_path):
-                    res = doctor.scan_directory(target_path)
+            elif lower_q.startswith("scan ") or lower_q in ("scan", "virus", "antivirus", "check threats", "scan full", "scan system", "scan pc", "scan laptop", "scan all"):
+                sub_target = query[5:].strip().strip('"').strip("'") if lower_q.startswith("scan ") else ""
+                lower_sub = sub_target.lower()
+
+                if not sub_target or any(k in lower_sub for k in ["my pc", "pc", "laptop", "computer", "system", "all", "full", "threat", "virus", "malware", "here"]):
+                    print("\n[AEGIS SHIELD] Running deep system security and threat audit...")
+                    sec = doctor.scan_threats()
+                    print(sec["summary_report"])
+                    print()
+                elif lower_sub in ("procs", "processes", "process"):
+                    print("\n[AEGIS SHIELD] Auditing process parentage, masquerading & LOLBins...")
+                    p_res = doctor.antivirus.scan_running_processes()
+                    print(f"Scanned: {p_res['processes_scanned']} | Threats: {p_res['threats_count']} | Suspicious: {p_res['suspicious_count']}")
+                    for t in p_res.get("threats", []):
+                        print(f"  - [{t['severity']}] {t['name']} (PID {t.get('pid')}): {t['description']}")
+                    for s in p_res.get("suspicious", []):
+                        print(f"  - [{s['severity']}] {s['name']} (PID {s.get('pid')}): {s['description']}")
+                    print()
+                elif lower_sub in ("net", "network", "beacons", "sockets"):
+                    print("\n[AEGIS SHIELD] Auditing active network sockets for rogue C2 beacons...")
+                    b_res = doctor.antivirus.scan_network_beacons()
+                    print(b_res["message"])
+                    for b in b_res.get("beacons", []):
+                        print(f"  - [{b['severity']}] PID {b['pid']} ({b['executable']}) -> {b['description']}")
+                    print()
+                elif lower_sub in ("tasks", "persistence", "startup"):
+                    print("\n[AEGIS SHIELD] Auditing persistence registry & scheduled tasks...")
+                    pers = doctor.antivirus.scan_persistence()
+                    print(pers["message"])
+                    for f in pers.get("findings", []):
+                        print(f"  - [{f['severity']}] [{f['category']}] {f['name']}: {f['description']}")
+                    print()
+                elif lower_sub in ("tampering", "defender", "security"):
+                    print("\n[AEGIS SHIELD] Auditing Windows Defender & UAC policy integrity...")
+                    tamp = doctor.antivirus.scan_security_tampering()
+                    print(tamp["message"])
+                    for fl in tamp.get("flags", []):
+                        print(f"  - [{fl['severity']}] {fl['subsystem']}: {fl['description']}")
+                    print()
+                elif os.path.isdir(sub_target):
+                    print(f"\n[AEGIS SHIELD] Scanning target directory: '{sub_target}'...")
+                    res = doctor.scan_directory(sub_target)
                     print(res["message"])
-                    if res.get("threats"):
-                        for t in res["threats"]:
-                            print(f"  - [THREAT] {t['filename']}: {', '.join(t.get('threats', []))}")
-                elif os.path.isfile(target_path):
-                    res = doctor.scan_file(target_path)
+                    for t in res.get("threats", []):
+                        print(f"  - [THREAT] {t['filename']}: {', '.join(t.get('threats', []))}")
+                    print()
+                elif os.path.isfile(sub_target):
+                    print(f"\n[AEGIS SHIELD] Scanning target file: '{sub_target}'...")
+                    res = doctor.scan_file(sub_target)
                     print(res["message"])
+                    print()
                 else:
-                    print(f"Target '{target_path}' not found.\n")
-                print()
+                    print(f"\n[AEGIS SHIELD] Running deep threat audit for '{sub_target}'...")
+                    sec = doctor.scan_threats()
+                    print(sec["summary_report"])
+                    print()
             elif lower_q.startswith("quarantine "):
                 target_file = query[11:].strip().strip('"').strip("'")
                 if target_file.lower() == "list":
@@ -956,6 +993,15 @@ def run_cli():
                     print(f"\n[AEGIS SHIELD] Isolating file to quarantine vault: '{target_file}'...")
                     q_res = doctor.quarantine_file(target_file)
                     print(f"Result: {q_res['message']}\n")
+            elif lower_q.startswith("kill ") or lower_q.startswith("terminate "):
+                parts = query.split()
+                if len(parts) > 1 and parts[1].isdigit():
+                    target_pid = int(parts[1])
+                    print(f"\n[AEGIS HUNTER-KILLER] Force-terminating hostile PID {target_pid} and isolating binary...")
+                    k_res = doctor.antivirus.hunter_killer(target_pid)
+                    print(f"Result: {k_res['message']}\n")
+                else:
+                    print("Usage: kill <pid>\n")
             elif lower_q in ("survey on", "monitor on", "watch on", "start survey"):
                 print("\n[AEGIS SENTINEL] Engaging 24/7 background telemetry daemon...")
                 s_res = doctor.start_sentinel(poll_interval=5.0, auto_heal_ram=True)
@@ -971,24 +1017,29 @@ def run_cli():
             elif lower_q in ("help", "?"):
                 print("\n[AEGIS DOCTOR & GUARDIAN COMMANDS]")
                 print("  --- Hardware & Triage ---")
-                print("  heal        - Full cure (RAM trim + DNS flush + temp cache purge)")
-                print("  ram         - Instantly trim idle RAM working sets across apps")
-                print("  dns         - Flush Windows DNS resolver cache")
-                print("  cache       - Safely purge stale %TEMP% files (>1h old)")
-                print("  startup     - List all startup programs and boot bottlenecks")
-                print("  score       - Generate complete hardware clinic report card")
-                print("  --- Antivirus & Threat Hunter ---")
-                print("  scan        - Full security audit (process masquerade, persistence, stealth cmd)")
-                print("  scan <path> - Scan specific file or folder for malware signatures")
+                print("  heal            - Full cure (RAM trim + DNS flush + temp cache purge)")
+                print("  ram             - Instantly trim idle RAM working sets across apps")
+                print("  dns             - Flush Windows DNS resolver cache")
+                print("  cache           - Safely purge stale %TEMP% files (>1h old)")
+                print("  startup         - List all startup programs and boot bottlenecks")
+                print("  score           - Generate complete hardware clinic report card")
+                print("  --- Military-Grade Antivirus & Threat Hunter ---")
+                print("  scan            - Deep EDR threat audit across all vectors")
+                print("  scan procs      - Audit process masquerading, parentage & LOLBins")
+                print("  scan net        - Audit active sockets for rogue C2 beacons")
+                print("  scan tasks      - Audit persistence in registry and scheduled tasks")
+                print("  scan tampering  - Audit Windows Defender & UAC policy integrity")
+                print("  scan <path>     - Scan specific file or folder for malware signatures")
+                print("  kill <pid>      - Force-terminate hostile process tree and quarantine binary")
                 print("  quarantine <path> - Safely neutralize & isolate suspicious file into vault")
-                print("  quarantine list   - List files safely held in quarantine vault")
-                print("  --- Sentinel 24/7 Monitor ---")
-                print("  survey on   - Start continuous background surveillance & auto-RAM trimming")
-                print("  survey off  - Stop continuous background surveillance")
-                print("  survey      - Show live Sentinel telemetry status & recent alert log")
+                print("  quarantine list - List all files held in quarantine vault")
+                print("  --- Sentinel 24/7 Background Guardian ---")
+                print("  survey on       - Start continuous background surveillance & auto-RAM trimming")
+                print("  survey off      - Stop continuous background surveillance")
+                print("  survey          - Show live Sentinel telemetry status & recent alert log")
                 print("  --- General ---")
-                print("  quit        - Exit to PowerShell")
-                print("  <text>      - Or describe any symptom or issue in plain English!\n")
+                print("  quit            - Exit to PowerShell")
+                print("  <text>          - Or describe any symptom or issue in plain English!\n")
             else:
                 consult = doctor.doctor_consult(query)
                 print(f"\n{consult['doctor_verdict']}\n")
