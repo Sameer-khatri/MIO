@@ -636,31 +636,45 @@ class AegisDoctor:
         diagnosis = []
         cures = []
 
-        if any(w in text for w in ["hot", "fan", "heat", "overheating", "thermal", "warm"]):
+        if any(w in text for w in ["hot", "fan", "heat", "overheating", "thermal", "warm", "fans", "burning"]):
             power = self.diagnose_thermal_and_power()
             diagnosis.append(f"Thermal State: {power.get('thermal_state')}. Active Power Scheme: {power.get('active_power_scheme')}.")
             cures.append("Switch power scheme to 'Balanced' instead of 'High Performance' to enable CPU idle C-states.")
             cures.append("Ensure laptop air vents are unblocked; elevate laptop rear by 1 inch for airflow.")
 
-        if any(w in text for w in ["battery", "drain", "charge", "unplugged", "discharging"]):
+        if any(w in text for w in ["battery", "drain", "charge", "unplugged", "discharging", "dying"]):
             bat = self.diagnose_battery()
             diagnosis.append(f"Battery Health: {bat.get('health_rating')} ({bat.get('charge_percent')}%, {bat.get('power_source')}).")
             cures.append("Lower screen brightness by 20% to save ~35% display power.")
             cures.append("Disable background gaming updaters (Steam, Riot Client) which keep dGPU active.")
 
-        if any(w in text for w in ["slow", "lag", "freezing", "stutter", "hang", "sluggish"]):
+        if any(w in text for w in ["slow", "lag", "freezing", "stutter", "hang", "sluggish", "delay", "takes forever", "forever", "unresponsive"]):
             mem = self.diagnose_memory_and_leaks()
             diagnosis.append(f"Resource Pressure: RAM load is {mem.get('load_percent')}% ({mem.get('pressure_level')}).")
-            cures.append("Run Aegis Treatment: 'apply_treatment(\"ram\")' to immediately reclaim idle RAM.")
+            cures.append("Run Aegis Treatment: 'heal' or 'ram' to immediately reclaim idle RAM.")
             cures.append("Check Task Manager for runaway web browser helper processes.")
 
-        if any(w in text for w in ["boot", "startup", "restart", "turning on"]):
+        if any(w in text for w in ["boot", "startup", "start up", "start", "starting", "restart", "turn on", "turning on"]):
             startup = self.diagnose_startup_bloat()
             diagnosis.append(f"Startup Triage: {startup.get('high_impact_count')} high-impact apps found ({startup.get('triage_summary')}).")
             cures.append("Disable automatic launch for Steam, Discord, and torrent clients to slash boot time by ~5-10 seconds.")
+            cures.append("Type 'startup' to review all startup applications and their boot impact.")
 
-        if any(w in text for w in ["internet", "wifi", "network", "ping", "disconnect"]):
-            cures.append("Execute network cure: flush DNS resolver and reset network sockets.")
+        if any(w in text for w in ["disk", "storage", "drive", "space", "full", "c:", "temp", "cache"]):
+            storage = self.diagnose_storage()
+            diagnosis.append(f"Storage Status: C: has {storage.get('c_drive_free_gb')} GB free ({storage.get('disk_status')}). Clutter: {storage.get('temp_clutter_mb')} MB.")
+            cures.append("Run Aegis Treatment: 'cache' to purge stale temporary files.")
+            cures.append("Uninstall unused games or move large files to secondary storage.")
+
+        if any(w in text for w in ["game", "gaming", "fps", "gpu", "stuttering"]):
+            power = self.diagnose_thermal_and_power()
+            mem = self.diagnose_memory_and_leaks()
+            diagnosis.append(f"Gaming Performance Check: CPU {power.get('cpu_load_percent')}%, RAM {mem.get('load_percent')}%.")
+            cures.append("Ensure laptop is plugged into AC power (running on DC battery heavily caps GPU clocks).")
+            cures.append("Close background Electron apps (Discord, Teams, Spotify) before launching heavy 3D titles.")
+
+        if any(w in text for w in ["internet", "wifi", "network", "ping", "disconnect", "lagging online"]):
+            cures.append("Execute network cure: flush DNS resolver with 'dns'.")
             cures.append("Verify Wi-Fi channel interference or switch to 5GHz band.")
 
         if not diagnosis:
@@ -800,22 +814,60 @@ def run_cli():
     checkup = doctor.full_checkup()
     print(checkup["report_card"])
 
-    print("Type a complaint (e.g. 'laptop is hot', 'battery dying fast', 'apply cure', or 'quit'):\n")
+    print("Type a complaint (e.g. 'laptop is hot', 'battery dying fast', 'heal', or 'quit'):")
+    print("Direct Commands: 'heal', 'ram', 'dns', 'cache', 'startup', 'score', 'help', 'quit'\n")
     while True:
         try:
             query = input("Aegis Doctor > ").strip()
             if not query:
                 continue
-            if query.lower() in ("quit", "exit", "q"):
+            lower_q = query.lower()
+            if lower_q in ("quit", "exit", "q"):
                 print("Doctor consultation ended. Stay cool and keep battery healthy!")
                 break
-            if query.lower() in ("apply cure", "cure", "heal", "treat"):
-                print("\nApplying hardware treatment...")
+            if lower_q in ("apply cure", "cure", "heal", "treat"):
+                print("\n[AEGIS] Applying comprehensive hardware treatment...")
                 res = doctor.apply_treatment("all")
-                print(f"Result: {res['message']}\n")
-            elif query.lower() in ("score", "health", "checkup"):
+                print(f"Result: {res['message']}")
+                for cat, det in res.get("details", {}).items():
+                    if isinstance(det, dict) and "message" in det:
+                        print(f"  - [{cat.upper()}] {det['message']}")
+                print()
+            elif lower_q in ("ram", "trim ram", "free ram"):
+                print("\n[AEGIS] Trimming process working sets...")
+                res = doctor.apply_treatment("ram")
+                ram_det = res.get("details", {}).get("ram", {})
+                print(f"Result: {ram_det.get('message', res['message'])}\n")
+            elif lower_q in ("dns", "flush dns", "fix network"):
+                print("\n[AEGIS] Flushing DNS resolver...")
+                res = doctor.apply_treatment("dns")
+                dns_det = res.get("details", {}).get("dns", {})
+                print(f"Result: {dns_det.get('message', res['message'])}\n")
+            elif lower_q in ("cache", "clean cache", "clean temp"):
+                print("\n[AEGIS] Purging stale temp files...")
+                res = doctor.apply_treatment("cache")
+                cache_det = res.get("details", {}).get("cache", {})
+                print(f"Result: {cache_det.get('message', res['message'])}\n")
+            elif lower_q in ("startup", "bloat", "startup apps"):
+                print("\n[AEGIS] Scanning Windows startup registry entries...")
+                bloat = doctor.diagnose_startup_bloat()
+                print(f"Found {bloat['total_startup_items']} startup entries ({bloat['high_impact_count']} High Impact):")
+                for it in bloat.get("items", []):
+                    print(f"  - [{it['boot_impact'].upper()}] {it['display_name']} ({it['name']}) -> {it['doctor_advice']}")
+                print()
+            elif lower_q in ("score", "health", "checkup", "vitals"):
                 res = doctor.full_checkup()
                 print(res["report_card"])
+            elif lower_q in ("help", "?"):
+                print("\n[AEGIS DOCTOR COMMANDS]")
+                print("  heal     - Apply full treatment (RAM trim + DNS flush + temp cache purge)")
+                print("  ram      - Trim RAM working sets across running apps")
+                print("  dns      - Flush Windows DNS resolver cache")
+                print("  cache    - Safely purge stale %TEMP% files (>1h old)")
+                print("  startup  - List all startup programs and boot bottlenecks")
+                print("  score    - Generate full hardware clinic report & vitals")
+                print("  quit     - Exit to PowerShell")
+                print("  <text>   - Or describe any issue in plain English!\n")
             else:
                 consult = doctor.doctor_consult(query)
                 print(f"\n{consult['doctor_verdict']}\n")
