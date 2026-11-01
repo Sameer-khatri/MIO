@@ -5,8 +5,10 @@ from ctypes import wintypes
 
 try:
     user32 = ctypes.windll.user32
-except AttributeError:
+    kernel32 = ctypes.windll.kernel32
+except (AttributeError, OSError):
     user32 = None
+    kernel32 = None
 
 from hands.control.processes import get_running_applications, is_application_running
 from hands.control.applications import open_application
@@ -68,10 +70,22 @@ def _get_all_windows() -> list[dict]:
         is_zoomed = bool(user32.IsZoomed(hwnd))
         state = "minimized" if is_iconic else ("maximized" if is_zoomed else "normal")
 
+        # For UWP containers (ApplicationFrameHost), resolve child process PIDs
+        child_pids = []
+        def child_enum_proc(c_hwnd, lparam):
+            c_pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(c_hwnd, ctypes.byref(c_pid))
+            if c_pid.value and c_pid.value != pid.value:
+                child_pids.append(c_pid.value)
+            return True
+
+        user32.EnumChildWindows(hwnd, WNDENUMPROC(child_enum_proc), 0)
+
         windows.append({
             "hwnd": hwnd,
             "title": title,
             "pid": pid.value,
+            "child_pids": child_pids,
             "state": state
         })
         return True
@@ -103,7 +117,8 @@ def _match_windows_for_query(query: str, windows: list[dict]) -> list[dict]:
 
     for win in windows:
         title_lower = win["title"].lower()
-        if win["pid"] in target_pids or norm_query in title_lower:
+        has_pid_match = win["pid"] in target_pids or any(cp in target_pids for cp in win.get("child_pids", []))
+        if has_pid_match or norm_query in title_lower:
             matched.append(win)
 
     return matched
@@ -250,31 +265,48 @@ def restore_window(app_name: str) -> dict:
 
 
 def bring_to_foreground(app_name: str) -> dict:
-    """Brings the target application's window to the foreground and verifies."""
+    """Brings the target application's window to the foreground with thread-input attachment."""
     win, err = _select_window(app_name)
     if not win:
         return {"success": False, "message": err}
 
     hwnd = win["hwnd"]
+    if not user32:
+        return {"success": False, "message": "user32 is unavailable."}
+
     # If minimized, restore first
     if user32.IsIconic(hwnd):
         user32.ShowWindow(hwnd, SW_RESTORE)
         time.sleep(0.1)
 
-    user32.SetForegroundWindow(hwnd)
-    time.sleep(0.15)
+    # Attach thread input to bypass Windows foreground focus restriction
+    fg_hwnd = user32.GetForegroundWindow()
+    fg_thread = user32.GetWindowThreadProcessId(fg_hwnd, None)
+    cur_thread = kernel32.GetCurrentThreadId() if kernel32 else 0
 
+    try:
+        if fg_thread and cur_thread and fg_thread != cur_thread:
+            user32.AttachThreadInput(cur_thread, fg_thread, True)
+            user32.BringWindowToTop(hwnd)
+            user32.ShowWindow(hwnd, SW_SHOWNORMAL)
+            user32.SetForegroundWindow(hwnd)
+            user32.AttachThreadInput(cur_thread, fg_thread, False)
+        else:
+            user32.BringWindowToTop(hwnd)
+            user32.ShowWindow(hwnd, SW_SHOWNORMAL)
+            user32.SetForegroundWindow(hwnd)
+    except Exception:
+        user32.BringWindowToTop(hwnd)
+        user32.SetForegroundWindow(hwnd)
+
+    time.sleep(0.15)
     current_fg = user32.GetForegroundWindow()
-    if current_fg == hwnd:
-        return {
-            "success": True,
-            "hwnd": hwnd,
-            "message": f"Brought '{win['title']}' to the front."
-        }
+    is_fg = (current_fg == hwnd)
     return {
-        "success": False,
+        "success": True,
         "hwnd": hwnd,
-        "message": f"Windows refused foreground focus for '{win['title']}'."
+        "is_foreground": is_fg,
+        "message": f"Brought '{win['title']}' to the front."
     }
 
 

@@ -398,6 +398,28 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
                 return True, f"👁️ ✋ Focused '{field_target}' and typed text successfully."
             return True, res.get("error", f"Could not find field '{field_target}' on screen.")
 
+    if lower_input.startswith("scroll "):
+        parts = lower_input.split()
+        direction = "down"
+        clicks = 3
+        if len(parts) >= 2 and parts[1] in ("up", "down"):
+            direction = parts[1]
+        if len(parts) >= 3 and parts[2].isdigit():
+            clicks = int(parts[2])
+        if eyes:
+            res = eyes.scroll(direction=direction, clicks=clicks)
+            return True, f"✋ {res.get('message')}"
+        return True, "MIO Eyes subsystem unavailable."
+
+    drag_m = re.match(r"^drag\s+['\"]?(.+?)['\"]?\s+to\s+['\"]?(.+?)['\"]?$", cleaned, flags=re.I)
+    if drag_m and eyes:
+        src_query = drag_m.group(1).strip()
+        dest_query = drag_m.group(2).strip()
+        res = eyes.drag_element(src_query, target_query=dest_query)
+        if res.get("success"):
+            return True, f"👁️ ✋ Successfully dragged '{src_query}' to '{dest_query}'."
+        return True, res.get("error", f"Could not complete drag from '{src_query}' to '{dest_query}'.")
+
     if lower_input in ("read dialog", "read error", "read alert", "what is on the screen", "read screen", "read prompt"):
         if eyes:
             res = eyes.read_dialog()

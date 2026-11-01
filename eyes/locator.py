@@ -129,3 +129,26 @@ def locate_element(query: str, target_window: str = "", control_type: str = "") 
         "error": f"Element matching '{clean_query}' could not be located via UI tree or OCR.",
         "window": win,
     }
+
+
+def wait_for_element(query: str, target_window: str = "", control_type: str = "", timeout: float = 3.0, poll_interval: float = 0.3) -> Dict[str, Any]:
+    """
+    Adaptive Visual Wait: Polls for an on-screen element over a timeout window.
+    Accounts for window opening, paint rendering delays, and UI transition animations.
+    """
+    import time
+    start_time = time.time()
+    last_res = None
+
+    while (time.time() - start_time) <= timeout:
+        res = locate_element(query=query, target_window=target_window, control_type=control_type)
+        if res.get("success"):
+            res["elapsed_sec"] = round(time.time() - start_time, 2)
+            return res
+        last_res = res
+        time.sleep(poll_interval)
+
+    if last_res:
+        last_res["timeout_sec"] = timeout
+        return last_res
+    return {"success": False, "error": f"Timed out waiting for element '{query}' after {timeout}s"}

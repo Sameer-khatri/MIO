@@ -155,7 +155,7 @@ class TestEyesHighLevel(unittest.TestCase):
         self.assertEqual(res["element"]["clickable_x"], 225)
         self.assertEqual(res["element"]["clickable_y"], 320)
 
-    @patch("eyes.locate_element")
+    @patch("eyes.wait_for_element")
     @patch("eyes.move_cursor")
     @patch("eyes.mouse_click")
     def test_click_element_collaborates_with_hands(self, mock_click, mock_move, mock_loc):
@@ -226,6 +226,37 @@ class TestDoctorAndAgentIntegration(unittest.TestCase):
         self.assertTrue(consult["success"])
         self.assertIn("Visual Screen Prompt (via MIO Eyes)", consult["doctor_diagnosis"])
         self.assertIn("Windows Update Alert", consult["doctor_diagnosis"])
+
+    @patch("eyes.locator.locate_element")
+    def test_wait_for_element_adaptive(self, mock_loc):
+        mock_loc.side_effect = [
+            {"success": False, "error": "Loading"},
+            {"success": True, "element": {"name": "Ready", "clickable_x": 50, "clickable_y": 50}},
+        ]
+        res = eyes.locator.wait_for_element("Ready", timeout=1.0, poll_interval=0.05)
+        self.assertTrue(res["success"])
+        self.assertEqual(res["element"]["name"], "Ready")
+
+    @patch("eyes.wait_for_element")
+    @patch("eyes.move_cursor")
+    @patch("eyes.mouse_drag_to")
+    def test_drag_element_collaborates_with_hands(self, mock_drag, mock_move, mock_wait):
+        mock_wait.side_effect = [
+            {"success": True, "element": {"clickable_x": 100, "clickable_y": 100}},
+            {"success": True, "element": {"clickable_x": 300, "clickable_y": 400}},
+        ]
+        mock_drag.return_value = {"success": True, "message": "Dragged"}
+        res = eyes.drag_element("ItemA", target_query="FolderB")
+        self.assertTrue(res["success"])
+        mock_move.assert_called_once_with(100, 100)
+        mock_drag.assert_called_once_with(300, 400, button="left", steps=20)
+
+    @patch("eyes.mouse_scroll")
+    def test_scroll_collaborates_with_hands(self, mock_scroll):
+        mock_scroll.return_value = {"success": True, "message": "Scrolled"}
+        res = eyes.scroll(direction="down", clicks=2)
+        self.assertTrue(res["success"])
+        mock_scroll.assert_called_once_with(-240)
 
 
 if __name__ == "__main__":

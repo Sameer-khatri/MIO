@@ -18,26 +18,33 @@ import time
 from eyes.guard import get_guard_status, SafeEyeShutter, is_window_safe, redact_sensitive_text
 from eyes.ocr import recognize_image, capture_and_recognize_region
 from eyes.ui_tree import inspect_ui_elements
-from eyes.locator import locate_element, find_target_window
+from eyes.locator import locate_element, find_target_window, wait_for_element
 from eyes.reader import read_active_dialog, read_screen_region
 
-from hands.action.mouse import move_cursor, click as mouse_click
+from hands.action.mouse import move_cursor, click as mouse_click, drag_to as mouse_drag_to, mouse_scroll
 from hands.action.input import type_text
 
 
-def see(query: str, target_window: str = "", control_type: str = "") -> Dict[str, Any]:
+def see(query: str, target_window: str = "", control_type: str = "", timeout: float = 0.0) -> Dict[str, Any]:
     """
     Looks for an on-screen visual element or button matching query.
+    If timeout > 0, performs adaptive polling until the element appears.
     Returns its bounding box, clickable coordinates, and matched window.
     """
+    if timeout > 0:
+        return wait_for_element(query=query, target_window=target_window, control_type=control_type, timeout=timeout)
     return locate_element(query=query, target_window=target_window, control_type=control_type)
 
 
-def click_element(query: str, target_window: str = "", double_click: bool = False) -> Dict[str, Any]:
+def click_element(query: str, target_window: str = "", double_click: bool = False, timeout: float = 2.0) -> Dict[str, Any]:
     """
-    Eyes find the element, and Action Hands click it.
+    Eyes find the element (with adaptive wait up to timeout seconds), and Action Hands click it.
     """
-    loc_res = locate_element(query=query, target_window=target_window)
+    if timeout > 0:
+        loc_res = wait_for_element(query=query, target_window=target_window, timeout=timeout)
+    else:
+        loc_res = locate_element(query=query, target_window=target_window)
+
     if not loc_res.get("success"):
         return loc_res
 
@@ -107,6 +114,60 @@ def read(x: int = 0, y: int = 0, width: int = 0, height: int = 0) -> Dict[str, A
     if width > 0 and height > 0:
         return read_screen_region(x=x, y=y, width=width, height=height)
     return read_active_dialog()
+
+
+def drag_element(source_query: str, target_query: str = "", delta_x: int = 0, delta_y: int = 0, target_window: str = "") -> Dict[str, Any]:
+    """
+    Computer-Using Agent Drag: Locates source element via Eyes and smoothly drags it
+    either to another visual target element or by (delta_x, delta_y) offset.
+    """
+    src_res = wait_for_element(query=source_query, target_window=target_window, timeout=2.0)
+    if not src_res.get("success"):
+        return src_res
+
+    src_el = src_res["element"]
+    start_x = src_el.get("clickable_x")
+    start_y = src_el.get("clickable_y")
+
+    if target_query:
+        dest_res = wait_for_element(query=target_query, target_window=target_window, timeout=2.0)
+        if not dest_res.get("success"):
+            return dest_res
+        dest_el = dest_res["element"]
+        end_x = dest_el.get("clickable_x")
+        end_y = dest_el.get("clickable_y")
+    else:
+        end_x = start_x + delta_x
+        end_y = start_y + delta_y
+
+    move_cursor(start_x, start_y)
+    time.sleep(0.05)
+    drag_res = mouse_drag_to(end_x, end_y, button="left", steps=20)
+
+    return {
+        "success": drag_res.get("success", False),
+        "action": "drag_element",
+        "source": source_query,
+        "from": (start_x, start_y),
+        "to": (end_x, end_y),
+        "drag_result": drag_res,
+    }
+
+
+def scroll(direction: str = "down", clicks: int = 3) -> Dict[str, Any]:
+    """
+    Simulates mouse wheel scrolling.
+    direction: 'up' or 'down'. clicks: number of scroll ticks.
+    """
+    amount = 120 * clicks if direction.lower() == "up" else -120 * clicks
+    res = mouse_scroll(amount)
+    return {
+        "success": res.get("success", False),
+        "action": "scroll",
+        "direction": direction.lower(),
+        "clicks": clicks,
+        "message": f"Scrolled {direction.lower()} by {clicks} click(s)."
+    }
 
 
 def get_status() -> Dict[str, Any]:
