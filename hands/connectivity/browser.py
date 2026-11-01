@@ -464,7 +464,7 @@ def control_youtube(action: str, seconds: int = 0) -> dict:
 
     # Attempt to focus YouTube or browser window instantly via Win32
     try:
-        from tools.windows import _get_all_windows, user32
+        from hands.control.windows import _get_all_windows, user32
         for w in _get_all_windows():
             t = w.get("title", "").lower()
             if "youtube" in t or any(b in t for b in ["brave", "chrome", "edge", "firefox", "opera"]):
@@ -477,7 +477,7 @@ def control_youtube(action: str, seconds: int = 0) -> dict:
         pass
 
     try:
-        from tools.input import send_hotkey
+        from hands.action.input import send_hotkey
 
         if act in ("play", "pause", "toggle", "play/pause"):
             res = send_hotkey(["k"])
@@ -551,7 +551,7 @@ def open_youtube_and_type(query: str, timestamp: str | int = 0, physical_typing:
 
             # 2. Focus browser
             try:
-                from tools.windows import bring_to_foreground
+                from hands.control.windows import bring_to_foreground
                 for b in ["brave", "chrome", "edge", "firefox", "opera"]:
                     if bring_to_foreground(b).get("success"):
                         time.sleep(0.3)
@@ -560,7 +560,7 @@ def open_youtube_and_type(query: str, timestamp: str | int = 0, physical_typing:
                 pass
 
             # 3. Press '/' to focus YouTube search bar
-            from tools.input import press_key, type_text
+            from hands.action.input import press_key, type_text
             press_key("/")
             time.sleep(0.3)
 

@@ -23,7 +23,7 @@ try:
         AegisDoctor,
     )
 except ImportError:
-    from agents.aegis.aegis import (
+    from people.aegis.aegis import (
         KNOWN_STARTUP_SIGNATURES,
         MEMORYSTATUSEX,
         SYSTEM_POWER_STATUS,
@@ -39,7 +39,7 @@ class TestAegisDoctor(unittest.TestCase):
     # 1. Battery Diagnostics
     # -------------------------------------------------------------------------
     def test_diagnose_battery_plugged_in(self):
-        with patch("agents.aegis.aegis.kernel32.GetSystemPowerStatus") as mock_power:
+        with patch("people.aegis.aegis.kernel32.GetSystemPowerStatus") as mock_power:
             def side_effect(sps_ptr):
                 sps = sps_ptr._obj
                 sps.ACLineStatus = 1  # AC
@@ -58,7 +58,7 @@ class TestAegisDoctor(unittest.TestCase):
             self.assertEqual(res["health_rating"], "Healthy Charge Capacity")
 
     def test_diagnose_battery_critical_dc(self):
-        with patch("agents.aegis.aegis.kernel32.GetSystemPowerStatus") as mock_power:
+        with patch("people.aegis.aegis.kernel32.GetSystemPowerStatus") as mock_power:
             def side_effect(sps_ptr):
                 sps = sps_ptr._obj
                 sps.ACLineStatus = 0  # DC
@@ -78,7 +78,7 @@ class TestAegisDoctor(unittest.TestCase):
             self.assertEqual(res["estimated_minutes_remaining"], 20.0)
 
     def test_diagnose_battery_desktop_no_battery(self):
-        with patch("agents.aegis.aegis.kernel32.GetSystemPowerStatus") as mock_power:
+        with patch("people.aegis.aegis.kernel32.GetSystemPowerStatus") as mock_power:
             def side_effect(sps_ptr):
                 sps = sps_ptr._obj
                 sps.ACLineStatus = 1
@@ -139,7 +139,7 @@ class TestAegisDoctor(unittest.TestCase):
     def test_diagnose_thermal_and_power(self):
         fake_powercfg = "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)\n"
         with patch("subprocess.check_output", return_value=fake_powercfg), \
-             patch("agents.aegis.aegis.kernel32.GetSystemTimes") as mock_times:
+             patch("people.aegis.aegis.kernel32.GetSystemTimes") as mock_times:
             mock_times.return_value = 1
             res = self.doc.diagnose_thermal_and_power()
             self.assertTrue(res["success"])
@@ -160,7 +160,7 @@ class TestAegisDoctor(unittest.TestCase):
 
         fake_tasklist = '"chrome.exe","1234","Console","1","2,500,000 K"\n"code.exe","5678","Console","1","800,000 K"\n'
 
-        with patch("agents.aegis.aegis.kernel32.GlobalMemoryStatusEx", side_effect=fake_mem_status), \
+        with patch("people.aegis.aegis.kernel32.GlobalMemoryStatusEx", side_effect=fake_mem_status), \
              patch("subprocess.check_output", return_value=fake_tasklist):
             res = self.doc.diagnose_memory_and_leaks()
             self.assertTrue(res["success"])
@@ -250,9 +250,9 @@ class TestAegisDoctor(unittest.TestCase):
         with patch.object(self.doc, "calculate_health_score", side_effect=[
             {"health_score": 65, "grade": "B"},
             {"health_score": 85, "grade": "A"},
-        ]), patch("agents.system_agent.tools.healer.trim_all_memory", return_value={"success": True, "reclaimed_gb": 3.0}), \
+        ]), patch("hands.connectivity.healer.trim_all_memory", return_value={"success": True, "reclaimed_gb": 3.0}), \
             patch("subprocess.check_output", return_value=""), \
-            patch("agents.system_agent.tools.healer.heal_temp_cache", return_value={"success": True, "freed_mb": 500}):
+            patch("hands.connectivity.healer.heal_temp_cache", return_value={"success": True, "freed_mb": 500}):
 
             res = self.doc.apply_treatment("all")
             self.assertTrue(res["success"])

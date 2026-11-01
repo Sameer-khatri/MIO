@@ -3,6 +3,8 @@ __pycache__/
 *$py.class
 .pytest_cache/
 agents/system_agent/app_memory.json
+core/app_memory.json
+*.json.bak
 
 # Node & Frontend
 node_modules/
@@ -24,4 +26,5 @@ Thumbs.db
 
 # Aegis Quarantine Vault
 agents/aegis/.quarantine/
+people/aegis/.quarantine/
 *.aegis_quarantined

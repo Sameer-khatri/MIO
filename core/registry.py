@@ -259,8 +259,6 @@ def get_tool_module(tool_name: str):
     for mod_path in [
         f"hands.{kit}.{clean_name}",
         f"hands.{clean_name}",
-        f"agents.system_agent.tools.{clean_name}",
-        f"tools.{clean_name}",
         clean_name,
     ]:
         try:

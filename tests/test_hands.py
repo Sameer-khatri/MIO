@@ -6,14 +6,14 @@ import shutil
 import tempfile
 import sys
 
-# Ensure core, hands, and root directories are on sys.path
+# Ensure core, hands, people, and root directories are on sys.path
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-for _p in [_ROOT, os.path.join(_ROOT, "core"), os.path.join(_ROOT, "hands"), os.path.join(_ROOT, "agents", "system_agent")]:
+for _p in [_ROOT, os.path.join(_ROOT, "core"), os.path.join(_ROOT, "hands"), os.path.join(_ROOT, "people")]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from agent import handle_command, extract_is_running_target, extract_where_target
-from tools.applications import (
+from core.agent import handle_command, extract_is_running_target, extract_where_target
+from hands.control.applications import (
     open_application,
     discover_all_applications,
     load_memory,
@@ -31,14 +31,14 @@ from tools.applications import (
     BUILTIN_APPS,
     ALIASES,
 )
-from tools.processes import (
+from hands.control.processes import (
     get_running_applications,
     is_application_running,
     get_friendly_name,
     KNOWN_PROCESS_NAMES,
     IGNORED_PROCESS_NAMES,
 )
-from tools.filesystem import (
+from hands.storage.filesystem import (
     resolve_location,
     resolve_destination,
     list_files,
@@ -55,10 +55,10 @@ from tools.filesystem import (
 
 class TestSystemAgent(unittest.TestCase):
     def setUp(self):
-        self.patcher_mem = patch("tools.applications.load_memory", return_value={})
+        self.patcher_mem = patch("hands.control.applications.load_memory", return_value={})
         self.mock_load_mem = self.patcher_mem.start()
 
-        self.patcher_save = patch("tools.applications.save_memory")
+        self.patcher_save = patch("hands.control.applications.save_memory")
         self.mock_save_mem = self.patcher_save.start()
 
     def tearDown(self):
@@ -143,7 +143,7 @@ class TestSystemAgent(unittest.TestCase):
         self.assertEqual(get_friendly_name("whatsapp.root", "WhatsApp"), "WhatsApp")
         self.assertEqual(get_friendly_name("antigravity ide", "PRIMEX - Antigravity IDE"), "Antigravity IDE")
 
-    @patch("tools.processes._get_apps_from_powershell")
+    @patch("hands.control.processes._get_apps_from_powershell")
     def test_get_running_applications_success(self, mock_ps):
         mock_ps.return_value = [
             {"pid": 101, "process_name": "chrome", "window_title": "Google Chrome"},
@@ -164,15 +164,15 @@ class TestSystemAgent(unittest.TestCase):
         self.assertEqual(names.count("Google Chrome"), 1)
         self.assertEqual(len(result["apps"]), 3)
 
-    @patch("tools.processes._get_apps_from_tasklist", return_value=[])
-    @patch("tools.processes._get_apps_from_powershell", return_value=[])
+    @patch("hands.control.processes._get_apps_from_tasklist", return_value=[])
+    @patch("hands.control.processes._get_apps_from_powershell", return_value=[])
     def test_get_running_applications_empty(self, mock_ps, mock_tl):
         result = get_running_applications()
         self.assertTrue(result["success"])
         self.assertEqual(result["apps"], [])
         self.assertEqual(result["message"], "No running applications found.")
 
-    @patch("tools.processes.get_running_applications")
+    @patch("hands.control.processes.get_running_applications")
     def test_is_application_running(self, mock_get_running):
         mock_get_running.return_value = {
             "success": True,
@@ -212,7 +212,7 @@ class TestSystemAgent(unittest.TestCase):
             self.assertTrue(absolute["success"])
             self.assertEqual(absolute["path"], nested)
 
-            with patch("tools.filesystem.resolve_location", side_effect=lambda name: os.path.join(tmpdir, name.title())):
+            with patch("hands.storage.filesystem.resolve_location", side_effect=lambda name: os.path.join(tmpdir, name.title())):
                 relative = resolve_destination("Documents\\Reports")
             self.assertTrue(relative["success"])
             self.assertEqual(relative["path"], nested)
@@ -238,7 +238,7 @@ class TestSystemAgent(unittest.TestCase):
             shutil.rmtree(remembered)
             replacement = os.path.join(tmpdir, "Desktop", "remembered")
             os.makedirs(replacement)
-            with patch("tools.filesystem.resolve_location", side_effect=lambda name: os.path.dirname(replacement) if name == "desktop" else tmpdir):
+            with patch("hands.storage.filesystem.resolve_location", side_effect=lambda name: os.path.dirname(replacement) if name == "desktop" else tmpdir):
                 result = resolve_destination("remembered")
             self.assertTrue(result["success"])
             self.assertEqual(result["path"], replacement)
@@ -250,14 +250,14 @@ class TestSystemAgent(unittest.TestCase):
             documents = os.path.join(tmpdir, "Documents")
             os.makedirs(os.path.join(desktop, "unique"))
             os.makedirs(documents)
-            with patch("tools.filesystem.resolve_location", side_effect=lambda name: desktop if name == "desktop" else documents):
+            with patch("hands.storage.filesystem.resolve_location", side_effect=lambda name: desktop if name == "desktop" else documents):
                 unique = resolve_destination("unique")
             self.assertTrue(unique["success"])
             self.assertEqual(unique["path"], os.path.join(desktop, "unique"))
 
             os.makedirs(os.path.join(documents, "ambiguous"))
             os.makedirs(os.path.join(desktop, "ambiguous"))
-            with patch("tools.filesystem.resolve_location", side_effect=lambda name: desktop if name == "desktop" else documents):
+            with patch("hands.storage.filesystem.resolve_location", side_effect=lambda name: desktop if name == "desktop" else documents):
                 ambiguous = resolve_destination("ambiguous")
                 missing = resolve_destination("no_such_destination")
             self.assertFalse(ambiguous["success"])
@@ -303,7 +303,7 @@ class TestSystemAgent(unittest.TestCase):
             target_file = os.path.join(sub, "report.pdf")
             open(target_file, "w").close()
 
-            with patch("tools.filesystem.resolve_location", side_effect=lambda l: tmpdir if l in ["desktop", "documents", "downloads"] else None):
+            with patch("hands.storage.filesystem.resolve_location", side_effect=lambda l: tmpdir if l in ["desktop", "documents", "downloads"] else None):
                 # Search for file
                 res_file = find_file_or_folder("report.pdf")
                 self.assertTrue(res_file["success"])
@@ -324,7 +324,7 @@ class TestSystemAgent(unittest.TestCase):
             with open(source_file, "w", encoding="utf-8") as f:
                 f.write("copy me")
 
-            with patch("tools.filesystem.resolve_location", side_effect=lambda loc: desktop if loc == "desktop" else source_root):
+            with patch("hands.storage.filesystem.resolve_location", side_effect=lambda loc: desktop if loc == "desktop" else source_root):
                 res = copy_file_or_folder("report.pdf", "desktop")
 
             destination = os.path.join(desktop, "report.pdf")
@@ -346,7 +346,7 @@ class TestSystemAgent(unittest.TestCase):
             with open(nested_file, "w", encoding="utf-8") as f:
                 f.write("folder copy")
 
-            with patch("tools.filesystem.resolve_location", side_effect=lambda loc: documents if loc == "documents" else source_root):
+            with patch("hands.storage.filesystem.resolve_location", side_effect=lambda loc: documents if loc == "documents" else source_root):
                 res = copy_file_or_folder("AIRA", "documents")
 
             destination = os.path.join(documents, "AIRA")
@@ -357,7 +357,7 @@ class TestSystemAgent(unittest.TestCase):
 
     def test_copy_source_not_found(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("tools.filesystem.resolve_location", return_value=tmpdir):
+            with patch("hands.storage.filesystem.resolve_location", return_value=tmpdir):
                 res = copy_file_or_folder("missing.txt", "desktop")
 
             self.assertFalse(res["success"])
@@ -374,7 +374,7 @@ class TestSystemAgent(unittest.TestCase):
             os.mkdir(one)
             os.mkdir(two)
 
-            with patch("tools.filesystem.resolve_location", side_effect=lambda loc: desktop if loc == "desktop" else source_root):
+            with patch("hands.storage.filesystem.resolve_location", side_effect=lambda loc: desktop if loc == "desktop" else source_root):
                 res = copy_file_or_folder("AIRA", "desktop")
 
             self.assertFalse(res["success"])
@@ -394,7 +394,7 @@ class TestSystemAgent(unittest.TestCase):
             with open(destination, "w", encoding="utf-8") as f:
                 f.write("existing")
 
-            with patch("tools.filesystem.resolve_location", side_effect=lambda loc: desktop if loc == "desktop" else source_root):
+            with patch("hands.storage.filesystem.resolve_location", side_effect=lambda loc: desktop if loc == "desktop" else source_root):
                 res = copy_file_or_folder("report.pdf", "desktop")
 
             self.assertFalse(res["success"])
@@ -404,8 +404,8 @@ class TestSystemAgent(unittest.TestCase):
 
     def test_copy_destination_resolution(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("tools.filesystem.resolve_location", return_value=tmpdir) as mock_resolve, \
-                 patch("tools.filesystem.find_file_or_folder", return_value={"success": True, "matches": []}):
+            with patch("hands.storage.filesystem.resolve_location", return_value=tmpdir) as mock_resolve, \
+                 patch("hands.storage.filesystem.find_file_or_folder", return_value={"success": True, "matches": []}):
                 copy_file_or_folder("report.pdf", "pictures")
 
             mock_resolve.assert_called_with("pictures")
@@ -427,8 +427,8 @@ class TestSystemAgent(unittest.TestCase):
                     return False
                 return real_exists(path)
 
-            with patch("tools.filesystem.resolve_location", side_effect=lambda loc: desktop if loc == "desktop" else source_root), \
-                 patch("tools.filesystem.os.path.exists", side_effect=exists_after_copy):
+            with patch("hands.storage.filesystem.resolve_location", side_effect=lambda loc: desktop if loc == "desktop" else source_root), \
+                 patch("hands.storage.filesystem.os.path.exists", side_effect=exists_after_copy):
                 res = copy_file_or_folder("report.pdf", "desktop")
 
             self.assertFalse(res["success"])
@@ -447,7 +447,7 @@ class TestSystemAgent(unittest.TestCase):
             self.assertTrue(os.path.isdir(os.path.join(destination_root, "PRIMEX")))
             child = os.path.join(source_folder, "child")
             os.mkdir(child)
-            with patch("tools.filesystem.find_file_or_folder", return_value={"success": True, "matches": [source_folder]}):
+            with patch("hands.storage.filesystem.find_file_or_folder", return_value={"success": True, "matches": [source_folder]}):
                 result = copy_file_or_folder(source_folder, child)
             self.assertFalse(result["success"])
             self.assertIn("itself or one of its child", result["message"])
@@ -472,7 +472,7 @@ class TestSystemAgent(unittest.TestCase):
             }
             self.use_fake_memory(fake_storage)
 
-            with patch("tools.filesystem.resolve_location", side_effect=lambda name: desktop if name == "desktop" else source_root):
+            with patch("hands.storage.filesystem.resolve_location", side_effect=lambda name: desktop if name == "desktop" else source_root):
                 result = move_file_or_folder("report.pdf", "desktop")
 
             destination = os.path.join(desktop, "report.pdf")
@@ -497,7 +497,7 @@ class TestSystemAgent(unittest.TestCase):
             collision_dest = os.path.join(destination_root, "report.txt")
             open(collision_source, "w").close()
             open(collision_dest, "w").close()
-            with patch("tools.filesystem.find_file_or_folder", return_value={"success": True, "matches": [collision_source, collision_dest]}):
+            with patch("hands.storage.filesystem.find_file_or_folder", return_value={"success": True, "matches": [collision_source, collision_dest]}):
                 collision = move_file_or_folder("report.txt", destination_root)
             self.assertFalse(collision["success"])
             self.assertIn("already exists", collision["message"])
@@ -507,7 +507,7 @@ class TestSystemAgent(unittest.TestCase):
             os.mkdir(child_source)
             child = os.path.join(child_source, "child")
             os.mkdir(child)
-            with patch("tools.filesystem.find_file_or_folder", return_value={"success": True, "matches": [child_source]}):
+            with patch("hands.storage.filesystem.find_file_or_folder", return_value={"success": True, "matches": [child_source]}):
                 child_result = move_file_or_folder(child_source, child)
             self.assertFalse(child_result["success"])
             self.assertIn("itself or one of its child", child_result["message"])
@@ -520,12 +520,12 @@ class TestSystemAgent(unittest.TestCase):
             open(two, "w").close()
             destination = os.path.join(tmpdir, "archive")
             os.mkdir(destination)
-            with patch("tools.filesystem.find_file_or_folder", return_value={"success": True, "matches": [one, two]}):
+            with patch("hands.storage.filesystem.find_file_or_folder", return_value={"success": True, "matches": [one, two]}):
                 source_result = move_file_or_folder("report.txt", destination)
             self.assertFalse(source_result["success"])
             self.assertEqual(source_result["matches"], [one, two])
 
-            with patch("tools.filesystem.resolve_destination", return_value={"success": False, "path": "", "matches": [one, two], "message": "Please be more specific."}):
+            with patch("hands.storage.filesystem.resolve_destination", return_value={"success": False, "path": "", "matches": [one, two], "message": "Please be more specific."}):
                 destination_result = move_file_or_folder(one, "archive")
             self.assertFalse(destination_result["success"])
             self.assertIn("more specific", destination_result["message"])
@@ -536,7 +536,7 @@ class TestSystemAgent(unittest.TestCase):
             open(source, "w").close()
             destination = os.path.join(tmpdir, "destination")
             os.mkdir(destination)
-            with patch("tools.filesystem.shutil.move"):
+            with patch("hands.storage.filesystem.shutil.move"):
                 result = move_file_or_folder(source, destination)
             self.assertFalse(result["success"])
             self.assertIn("verification failed", result["message"])
@@ -586,12 +586,12 @@ class TestSystemAgent(unittest.TestCase):
             two = os.path.join(tmpdir, "two")
             os.mkdir(one)
             os.mkdir(two)
-            with patch("tools.filesystem.find_file_or_folder", return_value={"success": True, "matches": [one, two]}):
+            with patch("hands.storage.filesystem.find_file_or_folder", return_value={"success": True, "matches": [one, two]}):
                 ambiguous = rename_file_or_folder("reports", "archive2")
             self.assertFalse(ambiguous["success"])
             self.assertEqual(ambiguous["matches"], [one, two])
 
-            with patch("tools.filesystem.os.rename"):
+            with patch("hands.storage.filesystem.os.rename"):
                 verification = rename_file_or_folder(renamed, "verified")
             self.assertFalse(verification["success"])
             self.assertIn("verification failed", verification["message"])
@@ -602,13 +602,13 @@ class TestSystemAgent(unittest.TestCase):
             documents = os.path.join(tmpdir, "Documents")
             os.makedirs(os.path.join(desktop, "AIRA"))
             os.makedirs(documents)
-            with patch("tools.filesystem.resolve_location", side_effect=lambda name: desktop if name == "desktop" else documents):
+            with patch("hands.storage.filesystem.resolve_location", side_effect=lambda name: desktop if name == "desktop" else documents):
                 result = create_folder("reports", "AIRA")
             self.assertTrue(result["success"])
             self.assertTrue(os.path.isdir(os.path.join(desktop, "AIRA", "reports")))
 
             os.makedirs(os.path.join(documents, "AIRA"))
-            with patch("tools.filesystem.resolve_location", side_effect=lambda name: desktop if name == "desktop" else documents):
+            with patch("hands.storage.filesystem.resolve_location", side_effect=lambda name: desktop if name == "desktop" else documents):
                 ambiguous = create_folder("backup", "AIRA")
             self.assertFalse(ambiguous["success"])
             self.assertIn("multiple destination folders", ambiguous["message"])
@@ -619,7 +619,7 @@ class TestSystemAgent(unittest.TestCase):
             os.makedirs(os.path.join(desktop, "AIRA"))
             os.makedirs(os.path.join(desktop, "AIRA_some_asset"))
             os.makedirs(os.path.join(desktop, "project_AIRA"))
-            with patch("tools.filesystem.resolve_location", side_effect=lambda name: desktop):
+            with patch("hands.storage.filesystem.resolve_location", side_effect=lambda name: desktop):
                 result = find_file_or_folder("AIRA")
             self.assertEqual(os.path.basename(result["matches"][0]), "AIRA")
             self.assertEqual(os.path.basename(result["matches"][1]), "AIRA_some_asset")
@@ -639,7 +639,7 @@ class TestSystemAgent(unittest.TestCase):
             }
             self.use_fake_memory(fake_storage)
 
-            with patch("tools.filesystem.resolve_location", return_value=tmpdir):
+            with patch("hands.storage.filesystem.resolve_location", return_value=tmpdir):
                 res = find_file_or_folder("stable_project")
 
             self.assertTrue(res["success"])
@@ -667,7 +667,7 @@ class TestSystemAgent(unittest.TestCase):
             }
             self.use_fake_memory(fake_storage)
 
-            with patch("tools.filesystem.resolve_location", side_effect=lambda loc: desktop if loc == "desktop" else documents):
+            with patch("hands.storage.filesystem.resolve_location", side_effect=lambda loc: desktop if loc == "desktop" else documents):
                 res = find_file_or_folder("missing_project")
 
             self.assertTrue(res["success"])
@@ -695,7 +695,7 @@ class TestSystemAgent(unittest.TestCase):
             }
             self.use_fake_memory(fake_storage)
 
-            with patch("tools.filesystem.resolve_location", side_effect=lambda loc: desktop if loc == "desktop" else documents):
+            with patch("hands.storage.filesystem.resolve_location", side_effect=lambda loc: desktop if loc == "desktop" else documents):
                 res = find_file_or_folder("AIRA")
 
             self.assertTrue(res["success"])
@@ -706,15 +706,15 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------
     # 4. Executable / Application Lookup Tests (tools/filesystem.py)
     # -------------------------------------------------------------
-    @patch("tools.filesystem._path_lookup", return_value=[])
-    @patch("tools.applications._get_packaged_start_apps", return_value={
+    @patch("hands.storage.filesystem._path_lookup", return_value=[])
+    @patch("hands.control.applications._get_packaged_start_apps", return_value={
         "WhatsApp": {"name": "WhatsApp", "launch_method": "appid", "target": "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"}
     })
-    @patch("tools.applications._get_registry_app_paths", return_value={})
-    @patch("tools.applications._get_start_menu_shortcuts", return_value={
+    @patch("hands.control.applications._get_registry_app_paths", return_value={})
+    @patch("hands.control.applications._get_start_menu_shortcuts", return_value={
         "Google Chrome": {"name": "Google Chrome", "launch_method": "shortcut", "target": r"C:\ProgramData\...\Google Chrome.lnk"}
     })
-    @patch("tools.applications.load_memory")
+    @patch("hands.control.applications.load_memory")
     def test_locate_executable_from_memory(self, mock_mem, mock_sm, mock_reg, mock_pkg, mock_path):
         mock_mem.return_value = {
             "whatsapp": {
@@ -724,46 +724,46 @@ class TestSystemAgent(unittest.TestCase):
                 "target": "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"
             }
         }
-        from tools.filesystem import locate_executable
+        from hands.storage.filesystem import locate_executable
         res = locate_executable("whatsapp")
         self.assertTrue(res["success"])
         self.assertEqual(res["name"], "WhatsApp")
         self.assertEqual(res["type"], "appid")
         self.assertIn("5319275A", res["target"])
 
-    @patch("tools.filesystem._path_lookup", return_value=[])
-    @patch("tools.applications._get_packaged_start_apps", return_value={})
-    @patch("tools.applications._get_registry_app_paths", return_value={})
-    @patch("tools.applications._get_start_menu_shortcuts", return_value={})
-    @patch("tools.applications.load_memory", return_value={})
+    @patch("hands.storage.filesystem._path_lookup", return_value=[])
+    @patch("hands.control.applications._get_packaged_start_apps", return_value={})
+    @patch("hands.control.applications._get_registry_app_paths", return_value={})
+    @patch("hands.control.applications._get_start_menu_shortcuts", return_value={})
+    @patch("hands.control.applications.load_memory", return_value={})
     def test_locate_executable_builtin(self, mock_mem, mock_sm, mock_reg, mock_pkg, mock_path):
-        from tools.filesystem import locate_executable
+        from hands.storage.filesystem import locate_executable
         res = locate_executable("notepad")
         self.assertTrue(res["success"])
         self.assertEqual(res["name"], "notepad")
         self.assertEqual(res["type"], "exe")
         self.assertEqual(res["target"], "notepad.exe")
 
-    @patch("tools.applications._get_packaged_start_apps", return_value={})
-    @patch("tools.applications._get_registry_app_paths", return_value={})
-    @patch("tools.applications._get_start_menu_shortcuts", return_value={})
-    @patch("tools.applications.load_memory", return_value={})
+    @patch("hands.control.applications._get_packaged_start_apps", return_value={})
+    @patch("hands.control.applications._get_registry_app_paths", return_value={})
+    @patch("hands.control.applications._get_start_menu_shortcuts", return_value={})
+    @patch("hands.control.applications.load_memory", return_value={})
     def test_locate_executable_path_single(self, mock_mem, mock_sm, mock_reg, mock_pkg):
-        from tools.filesystem import locate_executable
-        with patch("tools.filesystem._path_lookup", return_value=[r"C:\Program Files\nodejs\node.exe"]):
+        from hands.storage.filesystem import locate_executable
+        with patch("hands.storage.filesystem._path_lookup", return_value=[r"C:\Program Files\nodejs\node.exe"]):
             res = locate_executable("node")
             self.assertTrue(res["success"])
             self.assertEqual(res["type"], "exe")
             self.assertEqual(res["matches"], [r"C:\Program Files\nodejs\node.exe"])
             self.assertEqual(res["message"], "Found node.")
 
-    @patch("tools.applications._get_packaged_start_apps", return_value={})
-    @patch("tools.applications._get_registry_app_paths", return_value={})
-    @patch("tools.applications._get_start_menu_shortcuts", return_value={})
-    @patch("tools.applications.load_memory", return_value={})
+    @patch("hands.control.applications._get_packaged_start_apps", return_value={})
+    @patch("hands.control.applications._get_registry_app_paths", return_value={})
+    @patch("hands.control.applications._get_start_menu_shortcuts", return_value={})
+    @patch("hands.control.applications.load_memory", return_value={})
     def test_locate_executable_path_multiple(self, mock_mem, mock_sm, mock_reg, mock_pkg):
-        from tools.filesystem import locate_executable
-        with patch("tools.filesystem._path_lookup", return_value=[
+        from hands.storage.filesystem import locate_executable
+        with patch("hands.storage.filesystem._path_lookup", return_value=[
             r"C:\Python311\python.exe",
             r"C:\Users\User\AppData\Local\Microsoft\WindowsApps\python.exe"
         ]):
@@ -771,43 +771,43 @@ class TestSystemAgent(unittest.TestCase):
             self.assertTrue(res["success"])
             self.assertEqual(len(res["matches"]), 2)
 
-    @patch("tools.filesystem._path_lookup", return_value=[])
-    @patch("tools.applications._get_packaged_start_apps", return_value={})
-    @patch("tools.applications._get_registry_app_paths", return_value={})
-    @patch("tools.applications._get_start_menu_shortcuts", return_value={
+    @patch("hands.storage.filesystem._path_lookup", return_value=[])
+    @patch("hands.control.applications._get_packaged_start_apps", return_value={})
+    @patch("hands.control.applications._get_registry_app_paths", return_value={})
+    @patch("hands.control.applications._get_start_menu_shortcuts", return_value={
         "Google Chrome": {"name": "Google Chrome", "launch_method": "shortcut", "target": r"C:\ProgramData\...\Google Chrome.lnk"}
     })
-    @patch("tools.applications.load_memory", return_value={})
+    @patch("hands.control.applications.load_memory", return_value={})
     def test_locate_executable_start_menu_shortcut(self, mock_mem, mock_sm, mock_reg, mock_pkg, mock_path):
-        from tools.filesystem import locate_executable
+        from hands.storage.filesystem import locate_executable
         res = locate_executable("google chrome")
         self.assertTrue(res["success"])
         self.assertEqual(res["name"], "Google Chrome")
         self.assertEqual(res["type"], "shortcut")
         self.assertIn(".lnk", res["target"])
 
-    @patch("tools.filesystem._path_lookup", return_value=[])
-    @patch("tools.applications._get_packaged_start_apps", return_value={
+    @patch("hands.storage.filesystem._path_lookup", return_value=[])
+    @patch("hands.control.applications._get_packaged_start_apps", return_value={
         "WhatsApp": {"name": "WhatsApp", "launch_method": "appid", "target": "5319275A.WhatsAppDesktop!App"}
     })
-    @patch("tools.applications._get_registry_app_paths", return_value={})
-    @patch("tools.applications._get_start_menu_shortcuts", return_value={})
-    @patch("tools.applications.load_memory", return_value={})
+    @patch("hands.control.applications._get_registry_app_paths", return_value={})
+    @patch("hands.control.applications._get_start_menu_shortcuts", return_value={})
+    @patch("hands.control.applications.load_memory", return_value={})
     def test_locate_executable_packaged_app(self, mock_mem, mock_sm, mock_reg, mock_pkg, mock_path):
-        from tools.filesystem import locate_executable
+        from hands.storage.filesystem import locate_executable
         res = locate_executable("whatsapp")
         self.assertTrue(res["success"])
         self.assertEqual(res["name"], "WhatsApp")
         self.assertEqual(res["type"], "appid")
         self.assertIn("5319275A", res["target"])
 
-    @patch("tools.filesystem._path_lookup", return_value=[])
-    @patch("tools.applications._get_packaged_start_apps", return_value={})
-    @patch("tools.applications._get_registry_app_paths", return_value={})
-    @patch("tools.applications._get_start_menu_shortcuts", return_value={})
-    @patch("tools.applications.load_memory", return_value={})
+    @patch("hands.storage.filesystem._path_lookup", return_value=[])
+    @patch("hands.control.applications._get_packaged_start_apps", return_value={})
+    @patch("hands.control.applications._get_registry_app_paths", return_value={})
+    @patch("hands.control.applications._get_start_menu_shortcuts", return_value={})
+    @patch("hands.control.applications.load_memory", return_value={})
     def test_locate_executable_not_found(self, mock_mem, mock_sm, mock_reg, mock_pkg, mock_path):
-        from tools.filesystem import locate_executable
+        from hands.storage.filesystem import locate_executable
         res = locate_executable("nonexistent_xyz_tool_12345")
         self.assertTrue(res["success"])
         self.assertIsNone(res["name"])
@@ -826,11 +826,11 @@ class TestSystemAgent(unittest.TestCase):
         }
         self.use_fake_memory(fake_storage)
 
-        with patch("tools.applications.os.path.isfile", return_value=False), \
-             patch("tools.applications._get_packaged_start_apps", return_value={}), \
-             patch("tools.applications._get_registry_app_paths", return_value={}), \
-             patch("tools.applications._get_start_menu_shortcuts", return_value={}), \
-             patch("tools.filesystem._path_lookup", return_value=[r"C:\New\node.exe"]):
+        with patch("hands.control.applications.os.path.isfile", return_value=False), \
+             patch("hands.control.applications._get_packaged_start_apps", return_value={}), \
+             patch("hands.control.applications._get_registry_app_paths", return_value={}), \
+             patch("hands.control.applications._get_start_menu_shortcuts", return_value={}), \
+             patch("hands.storage.filesystem._path_lookup", return_value=[r"C:\New\node.exe"]):
             res = locate_executable("node")
 
         self.assertTrue(res["success"])
@@ -850,11 +850,11 @@ class TestSystemAgent(unittest.TestCase):
         }
         self.use_fake_memory(fake_storage)
 
-        with patch("tools.applications.os.path.isfile", return_value=False), \
-             patch("tools.filesystem._path_lookup", return_value=[]), \
-             patch("tools.applications._get_packaged_start_apps", return_value={}), \
-             patch("tools.applications._get_registry_app_paths", return_value={}), \
-             patch("tools.applications._get_start_menu_shortcuts", return_value={
+        with patch("hands.control.applications.os.path.isfile", return_value=False), \
+             patch("hands.storage.filesystem._path_lookup", return_value=[]), \
+             patch("hands.control.applications._get_packaged_start_apps", return_value={}), \
+             patch("hands.control.applications._get_registry_app_paths", return_value={}), \
+             patch("hands.control.applications._get_start_menu_shortcuts", return_value={
                  "Google Chrome": {"name": "Google Chrome", "launch_method": "shortcut", "target": r"C:\New\Chrome.lnk"}
              }):
             res = locate_executable("chrome")
@@ -876,10 +876,10 @@ class TestSystemAgent(unittest.TestCase):
         }
         self.use_fake_memory(fake_storage)
 
-        with patch("tools.filesystem._path_lookup", return_value=[]), \
-             patch("tools.applications._get_registry_app_paths", return_value={}), \
-             patch("tools.applications._get_start_menu_shortcuts", return_value={}), \
-             patch("tools.applications._get_packaged_start_apps", return_value={
+        with patch("hands.storage.filesystem._path_lookup", return_value=[]), \
+             patch("hands.control.applications._get_registry_app_paths", return_value={}), \
+             patch("hands.control.applications._get_start_menu_shortcuts", return_value={}), \
+             patch("hands.control.applications._get_packaged_start_apps", return_value={
                  "WhatsApp": {"name": "WhatsApp", "launch_method": "appid", "target": "New.WhatsApp!App"}
              }):
             res = locate_executable("whatsapp")
@@ -900,11 +900,11 @@ class TestSystemAgent(unittest.TestCase):
         }
         self.use_fake_memory(fake_storage)
 
-        with patch("tools.applications.os.path.isfile", return_value=False), \
-             patch("tools.filesystem._path_lookup", return_value=[]), \
-             patch("tools.applications._get_packaged_start_apps", return_value={}), \
-             patch("tools.applications._get_registry_app_paths", return_value={}), \
-             patch("tools.applications._get_start_menu_shortcuts", return_value={
+        with patch("hands.control.applications.os.path.isfile", return_value=False), \
+             patch("hands.storage.filesystem._path_lookup", return_value=[]), \
+             patch("hands.control.applications._get_packaged_start_apps", return_value={}), \
+             patch("hands.control.applications._get_registry_app_paths", return_value={}), \
+             patch("hands.control.applications._get_start_menu_shortcuts", return_value={
                  "Google Chrome": {"name": "Google Chrome", "launch_method": "shortcut", "target": r"C:\New\Chrome.lnk"}
              }):
             res = locate_executable("google chrome")
@@ -933,11 +933,11 @@ class TestSystemAgent(unittest.TestCase):
         self.assertEqual(fake_storage["chrome"]["target"], r"C:\New\Chrome.lnk")
         self.assertIn("google chrome", fake_storage["chrome"]["aliases"])
 
-    @patch("tools.filesystem._path_lookup", return_value=[])
-    @patch("tools.applications._get_packaged_start_apps", return_value={})
-    @patch("tools.applications._get_registry_app_paths", return_value={})
-    @patch("tools.applications._get_start_menu_shortcuts", return_value={})
-    @patch("tools.applications.load_memory")
+    @patch("hands.storage.filesystem._path_lookup", return_value=[])
+    @patch("hands.control.applications._get_packaged_start_apps", return_value={})
+    @patch("hands.control.applications._get_registry_app_paths", return_value={})
+    @patch("hands.control.applications._get_start_menu_shortcuts", return_value={})
+    @patch("hands.control.applications.load_memory")
     def test_locate_executable_case_insensitive(self, mock_mem, mock_sm, mock_reg, mock_pkg, mock_path):
         mock_mem.return_value = {
             "chrome": {
@@ -947,8 +947,8 @@ class TestSystemAgent(unittest.TestCase):
                 "target": r"C:\ProgramData\...\Google Chrome.lnk"
             }
         }
-        from tools.filesystem import locate_executable
-        with patch("tools.applications.os.path.isfile", return_value=True):
+        from hands.storage.filesystem import locate_executable
+        with patch("hands.control.applications.os.path.isfile", return_value=True):
             for query in ("Chrome", "CHROME", "chrome"):
                 with self.subTest(query=query):
                     res = locate_executable(query)
@@ -971,7 +971,7 @@ class TestSystemAgent(unittest.TestCase):
     # 6. Command Handler Tests (agent.py)
     # -------------------------------------------------------------
     def test_handle_command_where_exe(self):
-        with patch("agent.locate_executable", return_value={
+        with patch("core.agent.locate_executable", return_value={
             "success": True, "query": "node", "type": "exe",
             "name": "node", "target": r"C:\Program Files\nodejs\node.exe",
             "matches": [r"C:\Program Files\nodejs\node.exe"],
@@ -984,7 +984,7 @@ class TestSystemAgent(unittest.TestCase):
             self.assertIn(r"C:\Program Files\nodejs\node.exe", msg)
 
     def test_handle_command_where_appid(self):
-        with patch("agent.locate_executable", return_value={
+        with patch("core.agent.locate_executable", return_value={
             "success": True, "query": "whatsapp", "type": "appid",
             "name": "WhatsApp", "target": "5319275A.WhatsAppDesktop!App",
             "matches": ["5319275A.WhatsAppDesktop!App"],
@@ -997,7 +997,7 @@ class TestSystemAgent(unittest.TestCase):
             self.assertIn("AppID: 5319275A", msg)
 
     def test_handle_command_where_shortcut(self):
-        with patch("agent.locate_executable", return_value={
+        with patch("core.agent.locate_executable", return_value={
             "success": True, "query": "chrome", "type": "shortcut",
             "name": "Google Chrome", "target": r"C:\ProgramData\...\Google Chrome.lnk",
             "matches": [r"C:\ProgramData\...\Google Chrome.lnk"],
@@ -1010,7 +1010,7 @@ class TestSystemAgent(unittest.TestCase):
             self.assertIn("Location:", msg)
 
     def test_handle_command_where_not_found(self):
-        with patch("agent.locate_executable", return_value={
+        with patch("core.agent.locate_executable", return_value={
             "success": True, "query": "nope", "type": None,
             "name": None, "target": None, "matches": [],
             "message": "I couldn't locate 'nope' on this system."
@@ -1020,36 +1020,36 @@ class TestSystemAgent(unittest.TestCase):
             self.assertEqual(msg, "I couldn't locate 'nope' on this system.")
 
     def test_handle_command_filesystem(self):
-        with patch("agent.list_files", return_value={"success": True, "location": "Downloads", "items": ["file1.txt", "file2.pdf"]}):
+        with patch("core.agent.list_files", return_value={"success": True, "location": "Downloads", "items": ["file1.txt", "file2.pdf"]}):
             should_continue, msg = handle_command("show files in downloads")
             self.assertTrue(should_continue)
             self.assertIn("Downloads:", msg)
             self.assertIn("- file1.txt", msg)
 
-        with patch("agent.create_folder", return_value={"success": True, "message": "Folder 'test' created successfully."}):
+        with patch("core.agent.create_folder", return_value={"success": True, "message": "Folder 'test' created successfully."}):
             should_continue, msg = handle_command("create folder test in desktop")
             self.assertTrue(should_continue)
             self.assertIn("✅ Folder 'test' created successfully.", msg)
 
-        with patch("agent.find_file_or_folder", return_value={"success": True, "matches": [r"C:\Users\Desktop\test"]}):
+        with patch("core.agent.find_file_or_folder", return_value={"success": True, "matches": [r"C:\Users\Desktop\test"]}):
             should_continue, msg = handle_command("find test folder")
             self.assertTrue(should_continue)
             self.assertIn("Found:", msg)
             self.assertIn(r"C:\Users\Desktop\test", msg)
 
-        with patch("agent.copy_file_or_folder", return_value={"success": True, "source": r"C:\src\report.pdf", "destination": r"C:\dst\report.pdf", "message": "Copied 'report.pdf' to desktop."}) as mock_copy:
+        with patch("core.agent.copy_file_or_folder", return_value={"success": True, "source": r"C:\src\report.pdf", "destination": r"C:\dst\report.pdf", "message": "Copied 'report.pdf' to desktop."}) as mock_copy:
             should_continue, msg = handle_command("copy report.pdf to desktop")
             self.assertTrue(should_continue)
             self.assertEqual(msg, "Copied 'report.pdf' to desktop.")
             mock_copy.assert_called_once_with("report.pdf", "desktop")
 
-        with patch("agent.move_file_or_folder", return_value={"success": True, "message": "Moved successfully."}) as mock_move:
+        with patch("core.agent.move_file_or_folder", return_value={"success": True, "message": "Moved successfully."}) as mock_move:
             should_continue, msg = handle_command("MOVE report.pdf TO desktop")
             self.assertTrue(should_continue)
             self.assertEqual(msg, "Moved successfully.")
             mock_move.assert_called_once_with("report.pdf", "desktop")
 
-        with patch("agent.rename_file_or_folder", return_value={"success": True, "message": "Renamed successfully."}) as mock_rename:
+        with patch("core.agent.rename_file_or_folder", return_value={"success": True, "message": "Renamed successfully."}) as mock_rename:
             should_continue, msg = handle_command("RENAME report.pdf TO final_report")
             self.assertTrue(should_continue)
             self.assertEqual(msg, "Renamed successfully.")
@@ -1072,50 +1072,50 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_system_info_cpu_usage(self):
-        from tools.system_info import get_cpu_usage
-        with patch("tools.system_info.ctypes.windll.kernel32.GetSystemTimes", return_value=1):
+        from hands.connectivity.system_info import get_cpu_usage
+        with patch("hands.connectivity.system_info.ctypes.windll.kernel32.GetSystemTimes", return_value=1):
             res = get_cpu_usage()
             self.assertTrue(res["success"])
             self.assertIn("CPU Usage", res["message"])
 
-        with patch("tools.system_info.ctypes.windll.kernel32.GetSystemTimes", side_effect=RuntimeError("fail")):
+        with patch("hands.connectivity.system_info.ctypes.windll.kernel32.GetSystemTimes", side_effect=RuntimeError("fail")):
             res = get_cpu_usage()
             self.assertFalse(res["success"])
             self.assertIn("Failed", res["message"])
 
     def test_system_info_ram_usage(self):
-        from tools.system_info import get_ram_usage
+        from hands.connectivity.system_info import get_ram_usage
         res = get_ram_usage()
         self.assertTrue(res["success"])
         self.assertGreater(res["total_gb"], 0)
         self.assertIn("RAM Usage", res["message"])
 
     def test_system_info_disk_space(self):
-        from tools.system_info import get_disk_space
+        from hands.connectivity.system_info import get_disk_space
         res = get_disk_space("C:\\")
         self.assertTrue(res["success"])
         self.assertGreater(res["total_gb"], 0)
 
-        with patch("tools.system_info.shutil.disk_usage", side_effect=Exception("Disk error")):
+        with patch("hands.connectivity.system_info.shutil.disk_usage", side_effect=Exception("Disk error")):
             err_res = get_disk_space("Z:\\")
             self.assertFalse(err_res["success"])
 
     def test_system_info_gpu(self):
-        from tools.system_info import get_gpu_info, get_gpu_usage
-        with patch("tools.system_info.shutil.which", return_value="C:\\nvidia-smi.exe"), \
-             patch("tools.system_info.subprocess.check_output", return_value="GeForce RTX 3050, 4096"):
+        from hands.connectivity.system_info import get_gpu_info, get_gpu_usage
+        with patch("hands.connectivity.system_info.shutil.which", return_value="C:\\nvidia-smi.exe"), \
+             patch("hands.connectivity.system_info.subprocess.check_output", return_value="GeForce RTX 3050, 4096"):
             info = get_gpu_info()
             self.assertTrue(info["success"])
             self.assertEqual(info["name"], "GeForce RTX 3050")
 
-        with patch("tools.system_info.shutil.which", return_value="C:\\nvidia-smi.exe"), \
-             patch("tools.system_info.subprocess.check_output", return_value="GeForce RTX 3050, 45, 1024, 4096"):
+        with patch("hands.connectivity.system_info.shutil.which", return_value="C:\\nvidia-smi.exe"), \
+             patch("hands.connectivity.system_info.subprocess.check_output", return_value="GeForce RTX 3050, 45, 1024, 4096"):
             usage = get_gpu_usage()
             self.assertTrue(usage["success"])
             self.assertEqual(usage["gpu_usage_percent"], 45)
 
     def test_system_info_aggregate(self):
-        from tools.system_info import get_system_info
+        from hands.connectivity.system_info import get_system_info
         res = get_system_info()
         self.assertTrue(res["success"])
         self.assertIn("OS:", res["message"])
@@ -1126,14 +1126,14 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_ports_listening(self):
-        from tools.ports import get_listening_ports
+        from hands.connectivity.ports import get_listening_ports
         fake_netstat = (
             "  Proto  Local Address          Foreign Address        State           PID\n"
             "  TCP    0.0.0.0:8080           0.0.0.0:0              LISTENING       1234\n"
             "  TCP    127.0.0.1:3000         0.0.0.0:0              LISTENING       5678\n"
         )
-        with patch("tools.ports.subprocess.check_output", return_value=fake_netstat), \
-             patch("tools.ports._get_process_map", return_value={1234: "node.exe", 5678: "app.exe"}):
+        with patch("hands.connectivity.ports.subprocess.check_output", return_value=fake_netstat), \
+             patch("hands.connectivity.ports._get_process_map", return_value={1234: "node.exe", 5678: "app.exe"}):
             res = get_listening_ports()
             self.assertTrue(res["success"])
             self.assertEqual(res["count"], 2)
@@ -1141,8 +1141,8 @@ class TestSystemAgent(unittest.TestCase):
             self.assertEqual(res["ports"][1]["port"], 8080)
 
     def test_ports_what_is_using_port(self):
-        from tools.ports import what_is_using_port
-        with patch("tools.ports.get_listening_ports", return_value={
+        from hands.connectivity.ports import what_is_using_port
+        with patch("hands.connectivity.ports.get_listening_ports", return_value={
             "success": True,
             "ports": [{"port": 8080, "process_name": "node.exe", "pid": 1234, "protocol": "TCP"}]
         }):
@@ -1157,7 +1157,7 @@ class TestSystemAgent(unittest.TestCase):
         self.assertFalse(invalid["success"])
 
     def test_ports_is_port_free(self):
-        from tools.ports import is_port_free
+        from hands.connectivity.ports import is_port_free
         self.assertFalse(is_port_free(-1)["success"])
         self.assertFalse(is_port_free(999999)["success"])
 
@@ -1166,35 +1166,35 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_network_internet_connectivity(self):
-        from tools.network import is_connected_to_internet
-        with patch("tools.network.socket.socket") as mock_sock:
+        from hands.connectivity.network import is_connected_to_internet
+        with patch("hands.connectivity.network.socket.socket") as mock_sock:
             mock_inst = mock_sock.return_value
             mock_inst.connect.return_value = None
             res = is_connected_to_internet()
             self.assertTrue(res["connected"])
 
-        with patch("tools.network.socket.socket") as mock_sock:
+        with patch("hands.connectivity.network.socket.socket") as mock_sock:
             mock_inst = mock_sock.return_value
             mock_inst.connect.side_effect = OSError("unreachable")
             res = is_connected_to_internet()
             self.assertFalse(res["connected"])
 
     def test_network_wifi_info(self):
-        from tools.network import get_wifi_info
+        from hands.connectivity.network import get_wifi_info
         fake_netsh = (
             "    State                  : connected\n"
             "    SSID                   : Office_5G\n"
             "    Signal                 : 85%\n"
             "    Radio type             : 802.11ax\n"
         )
-        with patch("tools.network.subprocess.check_output", return_value=fake_netsh):
+        with patch("hands.connectivity.network.subprocess.check_output", return_value=fake_netsh):
             res = get_wifi_info()
             self.assertTrue(res["connected"])
             self.assertEqual(res["ssid"], "Office_5G")
             self.assertEqual(res["signal"], "85%")
 
     def test_network_ping_safe_and_rejections(self):
-        from tools.network import ping_host
+        from hands.connectivity.network import ping_host
         # Injection attempts must be rejected
         self.assertFalse(ping_host("google.com; rm -rf /")["success"])
         self.assertFalse(ping_host("127.0.0.1 && dir")["success"])
@@ -1202,7 +1202,7 @@ class TestSystemAgent(unittest.TestCase):
 
         # Valid ping
         fake_ping = "Packets: Sent = 2, Received = 2, Lost = 0 (0% loss), Average = 12ms"
-        with patch("tools.network.subprocess.check_output", return_value=fake_ping):
+        with patch("hands.connectivity.network.subprocess.check_output", return_value=fake_ping):
             res = ping_host("google.com", 2)
             self.assertTrue(res["success"])
             self.assertTrue(res["reachable"])
@@ -1213,13 +1213,13 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_windows_list_and_match(self):
-        from tools.windows import list_windows
+        from hands.control.windows import list_windows
         fake_wins = [
             {"hwnd": 100, "title": "Untitled - Notepad", "pid": 111, "state": "normal"},
             {"hwnd": 200, "title": "Google Chrome", "pid": 222, "state": "normal"},
         ]
-        with patch("tools.windows._get_all_windows", return_value=fake_wins), \
-             patch("tools.windows.get_running_applications", return_value={"success": True, "apps": []}):
+        with patch("hands.control.windows._get_all_windows", return_value=fake_wins), \
+             patch("hands.control.windows.get_running_applications", return_value={"success": True, "apps": []}):
             res = list_windows()
             self.assertTrue(res["success"])
             self.assertEqual(res["count"], 2)
@@ -1229,54 +1229,54 @@ class TestSystemAgent(unittest.TestCase):
             self.assertEqual(filtered["count"], 1)
 
     def test_windows_minimize_maximize_restore(self):
-        from tools.windows import minimize_window, maximize_window, restore_window
+        from hands.control.windows import minimize_window, maximize_window, restore_window
         fake_win = {"hwnd": 100, "title": "Test App", "pid": 111, "state": "normal"}
 
-        with patch("tools.windows._select_window", return_value=(fake_win, None)), \
-             patch("tools.windows.user32.ShowWindow"), \
-             patch("tools.windows.user32.IsIconic", return_value=1), \
-             patch("tools.windows.user32.IsZoomed", return_value=0):
+        with patch("hands.control.windows._select_window", return_value=(fake_win, None)), \
+             patch("hands.control.windows.user32.ShowWindow"), \
+             patch("hands.control.windows.user32.IsIconic", return_value=1), \
+             patch("hands.control.windows.user32.IsZoomed", return_value=0):
             res = minimize_window("Test App")
             self.assertTrue(res["success"])
             self.assertEqual(res["state"], "minimized")
 
-        with patch("tools.windows._select_window", return_value=(fake_win, None)), \
-             patch("tools.windows.user32.ShowWindow"), \
-             patch("tools.windows.user32.IsIconic", return_value=0), \
-             patch("tools.windows.user32.IsZoomed", return_value=1):
+        with patch("hands.control.windows._select_window", return_value=(fake_win, None)), \
+             patch("hands.control.windows.user32.ShowWindow"), \
+             patch("hands.control.windows.user32.IsIconic", return_value=0), \
+             patch("hands.control.windows.user32.IsZoomed", return_value=1):
             res = maximize_window("Test App")
             self.assertTrue(res["success"])
             self.assertEqual(res["state"], "maximized")
 
-        with patch("tools.windows._select_window", return_value=(fake_win, None)), \
-             patch("tools.windows.user32.ShowWindow"), \
-             patch("tools.windows.user32.IsIconic", return_value=0), \
-             patch("tools.windows.user32.IsZoomed", return_value=0):
+        with patch("hands.control.windows._select_window", return_value=(fake_win, None)), \
+             patch("hands.control.windows.user32.ShowWindow"), \
+             patch("hands.control.windows.user32.IsIconic", return_value=0), \
+             patch("hands.control.windows.user32.IsZoomed", return_value=0):
             res = restore_window("Test App")
             self.assertTrue(res["success"])
             self.assertEqual(res["state"], "normal")
 
     def test_windows_close_rejects_protected(self):
-        from tools.windows import close_application
+        from hands.control.windows import close_application
         for protected in ["explorer", "system", "dwm", "taskmgr", "antigravity"]:
             res = close_application(protected)
             self.assertFalse(res["success"])
             self.assertIn("Safety restriction", res["message"])
 
     def test_windows_close_and_restart(self):
-        from tools.windows import close_application, restart_application
+        from hands.control.windows import close_application, restart_application
         fake_win = {"hwnd": 100, "title": "Notepad", "pid": 111, "state": "normal"}
 
-        with patch("tools.windows._match_windows_for_query", return_value=[fake_win]), \
-             patch("tools.windows.user32.PostMessageW"), \
-             patch("tools.windows._get_all_windows", return_value=[]):
+        with patch("hands.control.windows._match_windows_for_query", return_value=[fake_win]), \
+             patch("hands.control.windows.user32.PostMessageW"), \
+             patch("hands.control.windows._get_all_windows", return_value=[]):
             res = close_application("notepad")
             self.assertTrue(res["success"])
             self.assertIn("Closed 'notepad' successfully", res["message"])
 
-        with patch("tools.windows.close_application", return_value={"success": True}), \
-             patch("tools.windows.is_application_running", return_value={"running": False}), \
-             patch("tools.windows.open_application", return_value={"success": True}):
+        with patch("hands.control.windows.close_application", return_value={"success": True}), \
+             patch("hands.control.windows.is_application_running", return_value={"running": False}), \
+             patch("hands.control.windows.open_application", return_value={"success": True}):
             res = restart_application("notepad")
             self.assertTrue(res["success"])
             self.assertIn("Restarted 'notepad' successfully", res["message"])
@@ -1286,31 +1286,31 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_delete_rejects_protected_and_git(self):
-        from tools.filesystem import delete_file_or_folder
+        from hands.storage.filesystem import delete_file_or_folder
         self.assertFalse(delete_file_or_folder("")["success"])
         self.assertFalse(delete_file_or_folder("C:\\")["success"])
 
-        with patch("tools.filesystem._resolve_single_source", return_value=(r"C:\Windows\System32", None)):
+        with patch("hands.storage.filesystem._resolve_single_source", return_value=(r"C:\Windows\System32", None)):
             res = delete_file_or_folder("system32")
             self.assertFalse(res["success"])
             self.assertIn("Safety restriction", res["message"])
 
-        with patch("tools.filesystem._resolve_single_source", return_value=(r"C:\repo\.git\HEAD", None)):
+        with patch("hands.storage.filesystem._resolve_single_source", return_value=(r"C:\repo\.git\HEAD", None)):
             res = delete_file_or_folder(".git")
             self.assertFalse(res["success"])
             self.assertIn("git repository", res["message"])
 
     def test_delete_success(self):
-        from tools.filesystem import delete_file_or_folder
+        from hands.storage.filesystem import delete_file_or_folder
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
             tmp.write(b"data")
             tmp_path = tmp.name
 
         try:
             self.assertTrue(os.path.exists(tmp_path))
-            with patch("tools.filesystem._resolve_single_source", return_value=(tmp_path, None)), \
-                 patch("tools.filesystem._recycle_path", return_value=True), \
-                 patch("tools.filesystem.os.path.exists", return_value=False):
+            with patch("hands.storage.filesystem._resolve_single_source", return_value=(tmp_path, None)), \
+                 patch("hands.storage.filesystem._recycle_path", return_value=True), \
+                 patch("hands.storage.filesystem.os.path.exists", return_value=False):
                 res = delete_file_or_folder(tmp_path)
                 self.assertTrue(res["success"])
                 self.assertIn("Recycle Bin", res["message"])
@@ -1323,74 +1323,74 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_handle_command_new_features(self):
-        from agent import handle_command
+        from core.agent import handle_command
 
-        with patch("agent.get_system_info", return_value={"message": "System: Windows"}):
+        with patch("core.agent.get_system_info", return_value={"message": "System: Windows"}):
             cont, msg = handle_command("show system info")
             self.assertTrue(cont)
             self.assertEqual(msg, "System: Windows")
 
-        with patch("agent.get_cpu_usage", return_value={"message": "CPU: 10%"}):
+        with patch("core.agent.get_cpu_usage", return_value={"message": "CPU: 10%"}):
             cont, msg = handle_command("show cpu usage")
             self.assertTrue(cont)
             self.assertEqual(msg, "CPU: 10%")
 
-        with patch("agent.get_listening_ports", return_value={"message": "Ports: 80"}):
+        with patch("core.agent.get_listening_ports", return_value={"message": "Ports: 80"}):
             cont, msg = handle_command("show listening ports")
             self.assertTrue(cont)
             self.assertEqual(msg, "Ports: 80")
 
-        with patch("agent.what_is_using_port", return_value={"message": "Port 8080 is used by node"}):
+        with patch("core.agent.what_is_using_port", return_value={"message": "Port 8080 is used by node"}):
             cont, msg = handle_command("what is using port 8080")
             self.assertTrue(cont)
             self.assertEqual(msg, "Port 8080 is used by node")
 
-        with patch("agent.is_port_free", return_value={"message": "Port 3000 is free."}):
+        with patch("core.agent.is_port_free", return_value={"message": "Port 3000 is free."}):
             cont, msg = handle_command("is port 3000 free")
             self.assertTrue(cont)
             self.assertEqual(msg, "Port 3000 is free.")
 
-        with patch("agent.get_wifi_info", return_value={"message": "Wi-Fi: Connected"}):
+        with patch("core.agent.get_wifi_info", return_value={"message": "Wi-Fi: Connected"}):
             cont, msg = handle_command("show wifi info")
             self.assertTrue(cont)
             self.assertEqual(msg, "Wi-Fi: Connected")
 
-        with patch("agent.is_connected_to_internet", return_value={"message": "Yes, connected"}):
+        with patch("core.agent.is_connected_to_internet", return_value={"message": "Yes, connected"}):
             cont, msg = handle_command("am i connected to internet?")
             self.assertTrue(cont)
             self.assertEqual(msg, "Yes, connected")
 
-        with patch("agent.ping_host", return_value={"message": "Ping OK"}):
+        with patch("core.agent.ping_host", return_value={"message": "Ping OK"}):
             cont, msg = handle_command("ping 8.8.8.8")
             self.assertTrue(cont)
             self.assertEqual(msg, "Ping OK")
 
-        with patch("agent.minimize_window", return_value={"message": "Minimized"}):
+        with patch("core.agent.minimize_window", return_value={"message": "Minimized"}):
             cont, msg = handle_command("minimize notepad")
             self.assertTrue(cont)
             self.assertEqual(msg, "Minimized")
 
-        with patch("agent.maximize_window", return_value={"message": "Maximized"}):
+        with patch("core.agent.maximize_window", return_value={"message": "Maximized"}):
             cont, msg = handle_command("maximize notepad")
             self.assertTrue(cont)
             self.assertEqual(msg, "Maximized")
 
-        with patch("agent.bring_to_foreground", return_value={"message": "Brought forward"}):
+        with patch("core.agent.bring_to_foreground", return_value={"message": "Brought forward"}):
             cont, msg = handle_command("bring notepad to front")
             self.assertTrue(cont)
             self.assertEqual(msg, "Brought forward")
 
-        with patch("agent.close_application", return_value={"message": "Closed"}):
+        with patch("core.agent.close_application", return_value={"message": "Closed"}):
             cont, msg = handle_command("close notepad")
             self.assertTrue(cont)
             self.assertEqual(msg, "Closed")
 
-        with patch("agent.restart_application", return_value={"message": "Restarted"}):
+        with patch("core.agent.restart_application", return_value={"message": "Restarted"}):
             cont, msg = handle_command("restart notepad")
             self.assertTrue(cont)
             self.assertEqual(msg, "Restarted")
 
-        with patch("agent.delete_file_or_folder", return_value={"message": "Deleted"}):
+        with patch("core.agent.delete_file_or_folder", return_value={"message": "Deleted"}):
             cont, msg = handle_command("delete report.pdf")
             self.assertTrue(cont)
             self.assertEqual(msg, "Deleted")
@@ -1400,8 +1400,8 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_audio_controls(self):
-        from tools.audio import set_volume, volume_up, volume_down, toggle_mute, media_play_pause, media_next, media_prev, media_stop
-        with patch("tools.audio.user32.keybd_event"):
+        from hands.sensory.audio import set_volume, volume_up, volume_down, toggle_mute, media_play_pause, media_next, media_prev, media_stop
+        with patch("hands.sensory.audio.user32.keybd_event"):
             res = set_volume(50)
             self.assertTrue(res["success"])
             self.assertEqual(res["volume_percent"], 50)
@@ -1435,15 +1435,15 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_clipboard_operations(self):
-        from tools.clipboard import get_clipboard_text, set_clipboard_text, clear_clipboard
-        with patch("tools.clipboard.user32.OpenClipboard", return_value=True), \
-             patch("tools.clipboard.user32.CloseClipboard", return_value=True), \
-             patch("tools.clipboard.user32.EmptyClipboard", return_value=True), \
-             patch("tools.clipboard.kernel32.GlobalAlloc", return_value=12345), \
-             patch("tools.clipboard.kernel32.GlobalLock", return_value=67890), \
-             patch("tools.clipboard.kernel32.GlobalUnlock", return_value=True), \
-             patch("tools.clipboard.user32.SetClipboardData", return_value=12345), \
-             patch("tools.clipboard.ctypes.memmove"):
+        from hands.action.clipboard import get_clipboard_text, set_clipboard_text, clear_clipboard
+        with patch("hands.action.clipboard.user32.OpenClipboard", return_value=True), \
+             patch("hands.action.clipboard.user32.CloseClipboard", return_value=True), \
+             patch("hands.action.clipboard.user32.EmptyClipboard", return_value=True), \
+             patch("hands.action.clipboard.kernel32.GlobalAlloc", return_value=12345), \
+             patch("hands.action.clipboard.kernel32.GlobalLock", return_value=67890), \
+             patch("hands.action.clipboard.kernel32.GlobalUnlock", return_value=True), \
+             patch("hands.action.clipboard.user32.SetClipboardData", return_value=12345), \
+             patch("hands.action.clipboard.ctypes.memmove"):
             set_res = set_clipboard_text("Hand Test Content")
             self.assertTrue(set_res["success"])
             self.assertEqual(set_res["text"], "Hand Test Content")
@@ -1451,7 +1451,7 @@ class TestSystemAgent(unittest.TestCase):
             clear_res = clear_clipboard()
             self.assertTrue(clear_res["success"])
 
-        with patch("tools.clipboard.user32.OpenClipboard", return_value=False):
+        with patch("hands.action.clipboard.user32.OpenClipboard", return_value=False):
             err_set = set_clipboard_text("Fail")
             self.assertFalse(err_set["success"])
 
@@ -1463,8 +1463,8 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_input_hotkeys_and_typing(self):
-        from tools.input import send_hotkey, show_desktop, open_task_manager, switch_app_alt_tab, type_text
-        with patch("tools.input.user32.keybd_event"):
+        from hands.action.input import send_hotkey, show_desktop, open_task_manager, switch_app_alt_tab, type_text
+        with patch("hands.action.input.user32.keybd_event"):
             desk = show_desktop()
             self.assertTrue(desk["success"])
 
@@ -1489,16 +1489,16 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_power_and_battery(self):
-        from tools.power import lock_workstation, turn_off_screen, get_battery_status
-        with patch("tools.power.user32.LockWorkStation", return_value=1):
+        from hands.connectivity.power import lock_workstation, turn_off_screen, get_battery_status
+        with patch("hands.connectivity.power.user32.LockWorkStation", return_value=1):
             lock_res = lock_workstation()
             self.assertTrue(lock_res["success"])
 
-        with patch("tools.power.user32.SendMessageW", return_value=0):
+        with patch("hands.connectivity.power.user32.SendMessageW", return_value=0):
             screen_res = turn_off_screen()
             self.assertTrue(screen_res["success"])
 
-        with patch("tools.power.kernel32.GetSystemPowerStatus", return_value=1):
+        with patch("hands.connectivity.power.kernel32.GetSystemPowerStatus", return_value=1):
             batt_res = get_battery_status()
             self.assertTrue(batt_res["success"])
             self.assertIn("Power Source", batt_res["message"])
@@ -1508,10 +1508,10 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_screen_capture(self):
-        from tools.screen import take_screenshot
-        with patch("tools.screen.subprocess.check_output", return_value=b""), \
-             patch("tools.screen.os.path.exists", return_value=True), \
-             patch("tools.screen.os.path.getsize", return_value=10240):
+        from hands.sensory.screen import take_screenshot
+        with patch("hands.sensory.screen.subprocess.check_output", return_value=b""), \
+             patch("hands.sensory.screen.os.path.exists", return_value=True), \
+             patch("hands.sensory.screen.os.path.getsize", return_value=10240):
             shot = take_screenshot("shot.png")
             self.assertTrue(shot["success"])
             self.assertIn("shot.png", shot["path"])
@@ -1521,69 +1521,69 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_agent_hand_commands(self):
-        from agent import handle_command
+        from core.agent import handle_command
 
-        with patch("agent.set_volume", return_value={"message": "Volume 70%"}):
+        with patch("core.agent.set_volume", return_value={"message": "Volume 70%"}):
             cont, msg = handle_command("set volume 70%")
             self.assertTrue(cont)
             self.assertEqual(msg, "Volume 70%")
 
-        with patch("agent.volume_up", return_value={"message": "Volume up"}):
+        with patch("core.agent.volume_up", return_value={"message": "Volume up"}):
             cont, msg = handle_command("volume up")
             self.assertTrue(cont)
             self.assertEqual(msg, "Volume up")
 
-        with patch("agent.toggle_mute", return_value={"message": "Muted"}):
+        with patch("core.agent.toggle_mute", return_value={"message": "Muted"}):
             cont, msg = handle_command("mute")
             self.assertTrue(cont)
             self.assertEqual(msg, "Muted")
 
-        with patch("agent.media_play_pause", return_value={"message": "Play"}):
+        with patch("core.agent.media_play_pause", return_value={"message": "Play"}):
             cont, msg = handle_command("play")
             self.assertTrue(cont)
             self.assertEqual(msg, "Play")
 
-        with patch("agent.media_next", return_value={"message": "Next"}):
+        with patch("core.agent.media_next", return_value={"message": "Next"}):
             cont, msg = handle_command("next track")
             self.assertTrue(cont)
             self.assertEqual(msg, "Next")
 
-        with patch("agent.get_clipboard_text", return_value={"message": "Clip: text"}):
+        with patch("core.agent.get_clipboard_text", return_value={"message": "Clip: text"}):
             cont, msg = handle_command("show clipboard")
             self.assertTrue(cont)
             self.assertEqual(msg, "Clip: text")
 
-        with patch("agent.set_clipboard_text", return_value={"message": "Copied"}):
+        with patch("core.agent.set_clipboard_text", return_value={"message": "Copied"}):
             cont, msg = handle_command("copy text https://github.com")
             self.assertTrue(cont)
             self.assertEqual(msg, "Copied")
 
-        with patch("agent.show_desktop", return_value={"message": "Desktop shown"}):
+        with patch("core.agent.show_desktop", return_value={"message": "Desktop shown"}):
             cont, msg = handle_command("show desktop")
             self.assertTrue(cont)
             self.assertEqual(msg, "Desktop shown")
 
-        with patch("agent.open_task_manager", return_value={"message": "Task Manager"}):
+        with patch("core.agent.open_task_manager", return_value={"message": "Task Manager"}):
             cont, msg = handle_command("open task manager")
             self.assertTrue(cont)
             self.assertEqual(msg, "Task Manager")
 
-        with patch("agent.lock_workstation", return_value={"message": "Locked"}):
+        with patch("core.agent.lock_workstation", return_value={"message": "Locked"}):
             cont, msg = handle_command("lock screen")
             self.assertTrue(cont)
             self.assertEqual(msg, "Locked")
 
-        with patch("agent.turn_off_screen", return_value={"message": "Screen off"}):
+        with patch("core.agent.turn_off_screen", return_value={"message": "Screen off"}):
             cont, msg = handle_command("turn off monitor")
             self.assertTrue(cont)
             self.assertEqual(msg, "Screen off")
 
-        with patch("agent.get_battery_status", return_value={"message": "Battery 85%"}):
+        with patch("core.agent.get_battery_status", return_value={"message": "Battery 85%"}):
             cont, msg = handle_command("show battery")
             self.assertTrue(cont)
             self.assertEqual(msg, "Battery 85%")
 
-        with patch("agent.take_screenshot", return_value={"message": "Screenshot saved"}):
+        with patch("core.agent.take_screenshot", return_value={"message": "Screenshot saved"}):
             cont, msg = handle_command("take screenshot")
             self.assertTrue(cont)
             self.assertEqual(msg, "Screenshot saved")
@@ -1593,21 +1593,21 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_notifications_play_chime(self):
-        from tools.notifications import play_chime
-        with patch("tools.notifications.winsound.MessageBeep", return_value=None):
+        from hands.sensory.notifications import play_chime
+        with patch("hands.sensory.notifications.winsound.MessageBeep", return_value=None):
             res = play_chime("asterisk")
             self.assertTrue(res["success"])
             self.assertIn("asterisk", res["message"])
 
-        with patch("tools.notifications.winsound.MessageBeep", side_effect=RuntimeError("Sound card error")):
+        with patch("hands.sensory.notifications.winsound.MessageBeep", side_effect=RuntimeError("Sound card error")):
             err_res = play_chime("asterisk")
             self.assertFalse(err_res["success"])
             self.assertIn("Failed", err_res["message"])
 
     def test_notifications_show_notification(self):
-        from tools.notifications import show_notification
-        with patch("tools.notifications.subprocess.Popen") as mock_popen, \
-             patch("tools.notifications.play_chime") as mock_chime:
+        from hands.sensory.notifications import show_notification
+        with patch("hands.sensory.notifications.subprocess.Popen") as mock_popen, \
+             patch("hands.sensory.notifications.play_chime") as mock_chime:
             res = show_notification("Meeting", "Starts in 5 minutes", with_chime=True)
             self.assertTrue(res["success"])
             self.assertEqual(res["title"], "Meeting")
@@ -1620,8 +1620,8 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_browser_open_url(self):
-        from tools.browser import open_url
-        with patch("tools.browser.webbrowser.open") as mock_open:
+        from hands.connectivity.browser import open_url
+        with patch("hands.connectivity.browser.webbrowser.open") as mock_open:
             res = open_url("github.com")
             self.assertTrue(res["success"])
             self.assertEqual(res["url"], "https://github.com")
@@ -1631,8 +1631,8 @@ class TestSystemAgent(unittest.TestCase):
         self.assertFalse(invalid_res["success"])
 
     def test_browser_search_web(self):
-        from tools.browser import search_web
-        with patch("tools.browser.open_url", return_value={"success": True}) as mock_open:
+        from hands.connectivity.browser import search_web
+        with patch("hands.connectivity.browser.open_url", return_value={"success": True}) as mock_open:
             res = search_web("python tutorials", engine="google")
             self.assertTrue(res["success"])
             self.assertIn("google.com/search?q=python+tutorials", res["url"])
@@ -1646,9 +1646,9 @@ class TestSystemAgent(unittest.TestCase):
             self.assertIn("bing.com/search?q=weather", bing_res["url"])
 
     def test_browser_open_incognito(self):
-        from tools.browser import open_incognito
-        with patch("tools.browser.shutil.which", side_effect=lambda x: "C:\\chrome.exe" if x == "chrome.exe" else None), \
-             patch("tools.browser.subprocess.Popen") as mock_popen:
+        from hands.connectivity.browser import open_incognito
+        with patch("hands.connectivity.browser.shutil.which", side_effect=lambda x: "C:\\chrome.exe" if x == "chrome.exe" else None), \
+             patch("hands.connectivity.browser.subprocess.Popen") as mock_popen:
             res = open_incognito("https://example.com")
             self.assertTrue(res["success"])
             self.assertEqual(res["browser"], "chrome.exe")
@@ -1659,8 +1659,8 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_mouse_cursor_position(self):
-        from tools.mouse import get_cursor_position
-        with patch("tools.mouse.user32.GetCursorPos") as mock_pos:
+        from hands.action.mouse import get_cursor_position
+        with patch("hands.action.mouse.user32.GetCursorPos") as mock_pos:
             def fake_get_pos(pt_ref):
                 pt_ref._obj.x = 450
                 pt_ref._obj.y = 350
@@ -1673,8 +1673,8 @@ class TestSystemAgent(unittest.TestCase):
             self.assertEqual(res["y"], 350)
 
     def test_mouse_move_cursor(self):
-        from tools.mouse import move_cursor
-        with patch("tools.mouse.user32.SetCursorPos", return_value=1) as mock_set:
+        from hands.action.mouse import move_cursor
+        with patch("hands.action.mouse.user32.SetCursorPos", return_value=1) as mock_set:
             res = move_cursor(100, 200)
             self.assertTrue(res["success"])
             self.assertEqual(res["x"], 100)
@@ -1685,9 +1685,9 @@ class TestSystemAgent(unittest.TestCase):
         self.assertFalse(err_res["success"])
 
     def test_mouse_clicks_and_scroll(self):
-        from tools.mouse import click, right_click, double_click, mouse_scroll
-        with patch("tools.mouse.user32.mouse_event") as mock_event, \
-             patch("tools.mouse.get_cursor_position", return_value={"x": 100, "y": 100}):
+        from hands.action.mouse import click, right_click, double_click, mouse_scroll
+        with patch("hands.action.mouse.user32.mouse_event") as mock_event, \
+             patch("hands.action.mouse.get_cursor_position", return_value={"x": 100, "y": 100}):
             left_res = click("left")
             self.assertTrue(left_res["success"])
 
@@ -1708,7 +1708,7 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_archive_zip_and_unzip(self):
-        from tools.archive import create_zip, extract_zip, list_zip_contents
+        from hands.storage.archive import create_zip, extract_zip, list_zip_contents
         with tempfile.TemporaryDirectory() as tmpdir:
             sample_file = os.path.join(tmpdir, "sample.txt")
             with open(sample_file, "w", encoding="utf-8") as f:
@@ -1737,7 +1737,7 @@ class TestSystemAgent(unittest.TestCase):
 
     def test_archive_zip_slip_protection(self):
         import zipfile
-        from tools.archive import extract_zip
+        from hands.storage.archive import extract_zip
         with tempfile.TemporaryDirectory() as tmpdir:
             malicious_zip = os.path.join(tmpdir, "malicious.zip")
             with zipfile.ZipFile(malicious_zip, "w") as zf:
@@ -1753,22 +1753,22 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_settings_get_and_set_theme(self):
-        from tools.settings import get_theme_mode, set_theme_mode, get_accent_color
-        with patch("tools.settings.winreg.OpenKey"), \
-             patch("tools.settings.winreg.QueryValueEx", side_effect=[(0, 4), (0, 4)]):
+        from hands.connectivity.settings import get_theme_mode, set_theme_mode, get_accent_color
+        with patch("hands.connectivity.settings.winreg.OpenKey"), \
+             patch("hands.connectivity.settings.winreg.QueryValueEx", side_effect=[(0, 4), (0, 4)]):
             theme_res = get_theme_mode()
             self.assertTrue(theme_res["success"])
             self.assertEqual(theme_res["theme"], "dark")
 
-        with patch("tools.settings.winreg.OpenKey"), \
-             patch("tools.settings.winreg.SetValueEx") as mock_set_val:
+        with patch("hands.connectivity.settings.winreg.OpenKey"), \
+             patch("hands.connectivity.settings.winreg.SetValueEx") as mock_set_val:
             set_res = set_theme_mode("light")
             self.assertTrue(set_res["success"])
             self.assertEqual(set_res["theme"], "light")
             self.assertEqual(mock_set_val.call_count, 2)
 
-        with patch("tools.settings.winreg.OpenKey"), \
-             patch("tools.settings.winreg.QueryValueEx", return_value=(0xC40078D7, 4)):
+        with patch("hands.connectivity.settings.winreg.OpenKey"), \
+             patch("hands.connectivity.settings.winreg.QueryValueEx", return_value=(0xC40078D7, 4)):
             accent_res = get_accent_color()
             self.assertTrue(accent_res["success"])
             self.assertEqual(accent_res["accent_hex"], "#0078D7")
@@ -1778,8 +1778,8 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_timer_uptime(self):
-        from tools.timer import get_system_uptime
-        with patch("tools.timer.kernel32.GetTickCount64", return_value=3661000):
+        from hands.connectivity.timer import get_system_uptime
+        with patch("hands.connectivity.timer.kernel32.GetTickCount64", return_value=3661000):
             res = get_system_uptime()
             self.assertTrue(res["success"])
             self.assertEqual(res["hours"], 1)
@@ -1787,8 +1787,8 @@ class TestSystemAgent(unittest.TestCase):
             self.assertEqual(res["seconds"], 1)
 
     def test_timer_countdown(self):
-        from tools.timer import start_timer, list_active_timers
-        with patch("tools.timer.threading.Thread.start"):
+        from hands.connectivity.timer import start_timer, list_active_timers
+        with patch("hands.connectivity.timer.threading.Thread.start"):
             res = start_timer(60, "Tea")
             self.assertTrue(res["success"])
             self.assertEqual(res["label"], "Tea")
@@ -1802,94 +1802,94 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_agent_new_hand_commands_routing(self):
-        from agent import handle_command
+        from core.agent import handle_command
 
-        with patch("agent.play_chime", return_value={"message": "Played asterisk"}):
+        with patch("core.agent.play_chime", return_value={"message": "Played asterisk"}):
             cont, msg = handle_command("play chime asterisk")
             self.assertTrue(cont)
             self.assertEqual(msg, "Played asterisk")
 
-        with patch("agent.show_notification", return_value={"message": "Notification sent"}):
+        with patch("core.agent.show_notification", return_value={"message": "Notification sent"}):
             cont, msg = handle_command("notify Meeting | Starts now")
             self.assertTrue(cont)
             self.assertEqual(msg, "Notification sent")
 
-        with patch("agent.open_url", return_value={"message": "Opened url"}):
+        with patch("core.agent.open_url", return_value={"message": "Opened url"}):
             cont, msg = handle_command("open url https://github.com")
             self.assertTrue(cont)
             self.assertEqual(msg, "Opened url")
 
-        with patch("agent.search_web", return_value={"message": "Searching google"}):
+        with patch("core.agent.search_web", return_value={"message": "Searching google"}):
             cont, msg = handle_command("search python tutorial")
             self.assertTrue(cont)
             self.assertEqual(msg, "Searching google")
 
-        with patch("agent.search_web", return_value={"message": "Searching youtube"}):
+        with patch("core.agent.search_web", return_value={"message": "Searching youtube"}):
             cont, msg = handle_command("search youtube for lo-fi")
             self.assertTrue(cont)
             self.assertEqual(msg, "Searching youtube")
 
-        with patch("agent.open_incognito", return_value={"message": "Incognito opened"}):
+        with patch("core.agent.open_incognito", return_value={"message": "Incognito opened"}):
             cont, msg = handle_command("open incognito https://google.com")
             self.assertTrue(cont)
             self.assertEqual(msg, "Incognito opened")
 
-        with patch("agent.get_cursor_position", return_value={"message": "X=100, Y=200"}):
+        with patch("core.agent.get_cursor_position", return_value={"message": "X=100, Y=200"}):
             cont, msg = handle_command("get cursor pos")
             self.assertTrue(cont)
             self.assertEqual(msg, "X=100, Y=200")
 
-        with patch("agent.move_cursor", return_value={"message": "Moved to 300, 400"}):
+        with patch("core.agent.move_cursor", return_value={"message": "Moved to 300, 400"}):
             cont, msg = handle_command("move cursor 300 400")
             self.assertTrue(cont)
             self.assertEqual(msg, "Moved to 300, 400")
 
-        with patch("agent.click", return_value={"message": "Clicked"}):
+        with patch("core.agent.click", return_value={"message": "Clicked"}):
             cont, msg = handle_command("click")
             self.assertTrue(cont)
             self.assertEqual(msg, "Clicked")
 
-        with patch("agent.right_click", return_value={"message": "Right-clicked"}):
+        with patch("core.agent.right_click", return_value={"message": "Right-clicked"}):
             cont, msg = handle_command("right click")
             self.assertTrue(cont)
             self.assertEqual(msg, "Right-clicked")
 
-        with patch("agent.double_click", return_value={"message": "Double-clicked"}):
+        with patch("core.agent.double_click", return_value={"message": "Double-clicked"}):
             cont, msg = handle_command("double click")
             self.assertTrue(cont)
             self.assertEqual(msg, "Double-clicked")
 
-        with patch("agent.mouse_scroll", return_value={"message": "Scrolled up"}):
+        with patch("core.agent.mouse_scroll", return_value={"message": "Scrolled up"}):
             cont, msg = handle_command("scroll up 120")
             self.assertTrue(cont)
             self.assertEqual(msg, "Scrolled up")
 
-        with patch("agent.create_zip", return_value={"message": "Created zip"}):
+        with patch("core.agent.create_zip", return_value={"message": "Created zip"}):
             cont, msg = handle_command("zip folder to backup.zip")
             self.assertTrue(cont)
             self.assertEqual(msg, "Created zip")
 
-        with patch("agent.extract_zip", return_value={"message": "Extracted zip"}):
+        with patch("core.agent.extract_zip", return_value={"message": "Extracted zip"}):
             cont, msg = handle_command("unzip backup.zip to folder")
             self.assertTrue(cont)
             self.assertEqual(msg, "Extracted zip")
 
-        with patch("agent.get_theme_mode", return_value={"message": "Theme is dark"}):
+        with patch("core.agent.get_theme_mode", return_value={"message": "Theme is dark"}):
             cont, msg = handle_command("show theme")
             self.assertTrue(cont)
             self.assertEqual(msg, "Theme is dark")
 
-        with patch("agent.set_theme_mode", return_value={"message": "Switched to dark"}):
+        with patch("core.agent.set_theme_mode", return_value={"message": "Switched to dark"}):
             cont, msg = handle_command("set theme dark")
             self.assertTrue(cont)
             self.assertEqual(msg, "Switched to dark")
 
-        with patch("agent.get_system_uptime", return_value={"message": "Uptime: 2 hours"}):
+        with patch("core.agent.get_system_uptime", return_value={"message": "Uptime: 2 hours"}):
             cont, msg = handle_command("system uptime")
             self.assertTrue(cont)
             self.assertEqual(msg, "Uptime: 2 hours")
 
-        with patch("agent.start_timer", return_value={"message": "Timer started"}):
+        with patch("core.agent.start_timer", return_value={"message": "Timer started"}):
             cont, msg = handle_command("set timer 120 Coffee")
             self.assertTrue(cont)
             self.assertEqual(msg, "Timer started")
@@ -1899,25 +1899,25 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_brightness_query_and_set(self):
-        from tools.brightness import get_brightness, set_brightness, increase_brightness, decrease_brightness
-        with patch("tools.brightness.subprocess.check_output", return_value="65"):
+        from hands.sensory.brightness import get_brightness, set_brightness, increase_brightness, decrease_brightness
+        with patch("hands.sensory.brightness.subprocess.check_output", return_value="65"):
             res = get_brightness()
             self.assertTrue(res["success"])
             self.assertEqual(res["brightness"], 65)
 
-        with patch("tools.brightness.subprocess.check_output", return_value=""):
+        with patch("hands.sensory.brightness.subprocess.check_output", return_value=""):
             set_res = set_brightness(80)
             self.assertTrue(set_res["success"])
             self.assertEqual(set_res["brightness"], 80)
 
-        with patch("tools.brightness.get_brightness", return_value={"success": True, "brightness": 50}), \
-             patch("tools.brightness.set_brightness", return_value={"success": True, "brightness": 60}) as mock_set:
+        with patch("hands.sensory.brightness.get_brightness", return_value={"success": True, "brightness": 50}), \
+             patch("hands.sensory.brightness.set_brightness", return_value={"success": True, "brightness": 60}) as mock_set:
             inc_res = increase_brightness(10)
             self.assertTrue(inc_res["success"])
             mock_set.assert_called_once_with(60)
 
-        with patch("tools.brightness.get_brightness", return_value={"success": True, "brightness": 50}), \
-             patch("tools.brightness.set_brightness", return_value={"success": True, "brightness": 40}) as mock_set:
+        with patch("hands.sensory.brightness.get_brightness", return_value={"success": True, "brightness": 50}), \
+             patch("hands.sensory.brightness.set_brightness", return_value={"success": True, "brightness": 40}) as mock_set:
             dec_res = decrease_brightness(10)
             self.assertTrue(dec_res["success"])
             mock_set.assert_called_once_with(40)
@@ -1927,14 +1927,14 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_wifi_tools(self):
-        from tools.wifi_tools import get_saved_wifi_profiles, get_wifi_password, scan_wifi_networks, flush_dns_cache
+        from hands.connectivity.wifi_tools import get_saved_wifi_profiles, get_wifi_password, scan_wifi_networks, flush_dns_cache
 
         fake_profiles = (
             "Profiles on interface Wi-Fi:\n"
             "    All User Profile     : HomeNetwork\n"
             "    All User Profile     : OfficeGuest\n"
         )
-        with patch("tools.wifi_tools.subprocess.check_output", return_value=fake_profiles):
+        with patch("hands.connectivity.wifi_tools.subprocess.check_output", return_value=fake_profiles):
             res_profiles = get_saved_wifi_profiles()
             self.assertTrue(res_profiles["success"])
             self.assertEqual(res_profiles["count"], 2)
@@ -1944,7 +1944,7 @@ class TestSystemAgent(unittest.TestCase):
             "Security settings\n"
             "    Key Content            : SuperSecret123\n"
         )
-        with patch("tools.wifi_tools.subprocess.check_output", return_value=fake_key):
+        with patch("hands.connectivity.wifi_tools.subprocess.check_output", return_value=fake_key):
             res_pwd = get_wifi_password("HomeNetwork")
             self.assertTrue(res_pwd["success"])
             self.assertEqual(res_pwd["password"], "SuperSecret123")
@@ -1954,13 +1954,13 @@ class TestSystemAgent(unittest.TestCase):
             "    Network type            : Infrastructure\n"
             "    Signal                  : 85%\n"
         )
-        with patch("tools.wifi_tools.subprocess.check_output", return_value=fake_scan):
+        with patch("hands.connectivity.wifi_tools.subprocess.check_output", return_value=fake_scan):
             res_scan = scan_wifi_networks()
             self.assertTrue(res_scan["success"])
             self.assertEqual(res_scan["count"], 1)
             self.assertEqual(res_scan["networks"][0]["ssid"], "CafeWiFi")
 
-        with patch("tools.wifi_tools.subprocess.check_output", return_value="Successfully flushed the DNS Resolver Cache."):
+        with patch("hands.connectivity.wifi_tools.subprocess.check_output", return_value="Successfully flushed the DNS Resolver Cache."):
             res_flush = flush_dns_cache()
             self.assertTrue(res_flush["success"])
 
@@ -1969,7 +1969,7 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_services_management(self):
-        from tools.services import list_services, get_service_status, start_service, stop_service, restart_service
+        from hands.connectivity.services import list_services, get_service_status, start_service, stop_service, restart_service
 
         fake_sc = (
             "SERVICE_NAME: Spooler\n"
@@ -1979,7 +1979,7 @@ class TestSystemAgent(unittest.TestCase):
             "DISPLAY_NAME: Windows Update\n"
             "        STATE              : 1  STOPPED\n"
         )
-        with patch("tools.services.subprocess.check_output", return_value=fake_sc):
+        with patch("hands.connectivity.services.subprocess.check_output", return_value=fake_sc):
             res_list = list_services()
             self.assertTrue(res_list["success"])
             self.assertEqual(res_list["count"], 2)
@@ -1990,17 +1990,17 @@ class TestSystemAgent(unittest.TestCase):
             "SERVICE_NAME: Spooler\n"
             "        STATE              : 4  RUNNING\n"
         )
-        with patch("tools.services.subprocess.check_output", return_value=fake_single):
+        with patch("hands.connectivity.services.subprocess.check_output", return_value=fake_single):
             status_res = get_service_status("Spooler")
             self.assertTrue(status_res["success"])
             self.assertTrue(status_res["running"])
             self.assertEqual(status_res["state"], "RUNNING")
 
-        with patch("tools.services.subprocess.check_output", return_value="SERVICE_START_PENDING"):
+        with patch("hands.connectivity.services.subprocess.check_output", return_value="SERVICE_START_PENDING"):
             start_res = start_service("Spooler")
             self.assertTrue(start_res["success"])
 
-        with patch("tools.services.subprocess.check_output", return_value="STOP_PENDING"):
+        with patch("hands.connectivity.services.subprocess.check_output", return_value="STOP_PENDING"):
             stop_res = stop_service("Spooler")
             self.assertTrue(stop_res["success"])
 
@@ -2009,11 +2009,11 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_installed_software(self):
-        from tools.installed_apps import list_installed_software, get_app_version
-        with patch("tools.installed_apps.winreg.OpenKey"), \
-             patch("tools.installed_apps.winreg.QueryInfoKey", return_value=(1, 0, 0)), \
-             patch("tools.installed_apps.winreg.EnumKey", return_value="NodeJS"), \
-             patch("tools.installed_apps.winreg.QueryValueEx", side_effect=lambda key, val: ("Node.js", 1) if val == "DisplayName" else ("20.10.0", 1) if val == "DisplayVersion" else ("OpenJS", 1)):
+        from hands.control.installed_apps import list_installed_software, get_app_version
+        with patch("hands.control.installed_apps.winreg.OpenKey"), \
+             patch("hands.control.installed_apps.winreg.QueryInfoKey", return_value=(1, 0, 0)), \
+             patch("hands.control.installed_apps.winreg.EnumKey", return_value="NodeJS"), \
+             patch("hands.control.installed_apps.winreg.QueryValueEx", side_effect=lambda key, val: ("Node.js", 1) if val == "DisplayName" else ("20.10.0", 1) if val == "DisplayVersion" else ("OpenJS", 1)):
             res = list_installed_software()
             self.assertTrue(res["success"])
             self.assertGreaterEqual(res["count"], 1)
@@ -2027,7 +2027,7 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_hasher_checksums(self):
-        from tools.hasher import hash_file, verify_checksum
+        from hands.storage.hasher import hash_file, verify_checksum
         with tempfile.TemporaryDirectory() as tmpdir:
             fpath = os.path.join(tmpdir, "test.bin")
             with open(fpath, "wb") as f:
@@ -2050,9 +2050,9 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_display_metrics(self):
-        from tools.display import get_display_info
-        with patch("tools.display.user32.GetSystemMetrics", side_effect=lambda x: 1920 if x == 0 else 1080 if x == 1 else 1 if x == 80 else 1920 if x == 78 else 1080), \
-             patch("tools.display.user32.GetDpiForSystem", return_value=96, create=True):
+        from hands.sensory.display import get_display_info
+        with patch("hands.sensory.display.user32.GetSystemMetrics", side_effect=lambda x: 1920 if x == 0 else 1080 if x == 1 else 1 if x == 80 else 1920 if x == 78 else 1080), \
+             patch("hands.sensory.display.user32.GetDpiForSystem", return_value=96, create=True):
             res = get_display_info()
             self.assertTrue(res["success"])
             self.assertEqual(res["primary_resolution"], "1920x1080")
@@ -2063,10 +2063,10 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_storage_drives(self):
-        from tools.drives import list_drives, get_removable_drives
-        with patch("tools.drives.kernel32.GetDriveTypeW", side_effect=lambda r: 3 if r == "C:\\" else 2 if r == "E:\\" else 1), \
-             patch("tools.drives.kernel32.GetVolumeInformationW", return_value=1), \
-             patch("tools.drives.shutil.disk_usage", return_value=type("obj", (), {"total": 500*1024**3, "free": 200*1024**3})()):
+        from hands.storage.drives import list_drives, get_removable_drives
+        with patch("hands.storage.drives.kernel32.GetDriveTypeW", side_effect=lambda r: 3 if r == "C:\\" else 2 if r == "E:\\" else 1), \
+             patch("hands.storage.drives.kernel32.GetVolumeInformationW", return_value=1), \
+             patch("hands.storage.drives.shutil.disk_usage", return_value=type("obj", (), {"total": 500*1024**3, "free": 200*1024**3})()):
             res = list_drives()
             self.assertTrue(res["success"])
             self.assertEqual(res["count"], 2)
@@ -2081,89 +2081,89 @@ class TestSystemAgent(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_agent_extended_hands_command_routing(self):
-        from agent import handle_command
+        from core.agent import handle_command
 
-        with patch("agent.get_brightness", return_value={"message": "Brightness: 70%"}):
+        with patch("core.agent.get_brightness", return_value={"message": "Brightness: 70%"}):
             cont, msg = handle_command("show brightness")
             self.assertTrue(cont)
             self.assertEqual(msg, "Brightness: 70%")
 
-        with patch("agent.set_brightness", return_value={"message": "Brightness set to 80%"}):
+        with patch("core.agent.set_brightness", return_value={"message": "Brightness set to 80%"}):
             cont, msg = handle_command("set brightness 80%")
             self.assertTrue(cont)
             self.assertEqual(msg, "Brightness set to 80%")
 
-        with patch("agent.increase_brightness", return_value={"message": "Brightness increased"}):
+        with patch("core.agent.increase_brightness", return_value={"message": "Brightness increased"}):
             cont, msg = handle_command("brightness up")
             self.assertTrue(cont)
             self.assertEqual(msg, "Brightness increased")
 
-        with patch("agent.decrease_brightness", return_value={"message": "Brightness decreased"}):
+        with patch("core.agent.decrease_brightness", return_value={"message": "Brightness decreased"}):
             cont, msg = handle_command("dim screen")
             self.assertTrue(cont)
             self.assertEqual(msg, "Brightness decreased")
 
-        with patch("agent.get_saved_wifi_profiles", return_value={"message": "Saved Wi-Fi list"}):
+        with patch("core.agent.get_saved_wifi_profiles", return_value={"message": "Saved Wi-Fi list"}):
             cont, msg = handle_command("show saved wifi")
             self.assertTrue(cont)
             self.assertEqual(msg, "Saved Wi-Fi list")
 
-        with patch("agent.get_wifi_password", return_value={"message": "Password is secret"}):
+        with patch("core.agent.get_wifi_password", return_value={"message": "Password is secret"}):
             cont, msg = handle_command("wifi password for HomeNetwork")
             self.assertTrue(cont)
             self.assertEqual(msg, "Password is secret")
 
-        with patch("agent.flush_dns_cache", return_value={"message": "DNS flushed"}):
+        with patch("core.agent.flush_dns_cache", return_value={"message": "DNS flushed"}):
             cont, msg = handle_command("flush dns")
             self.assertTrue(cont)
             self.assertEqual(msg, "DNS flushed")
 
-        with patch("agent.list_services", return_value={"message": "Services list"}):
+        with patch("core.agent.list_services", return_value={"message": "Services list"}):
             cont, msg = handle_command("list services")
             self.assertTrue(cont)
             self.assertEqual(msg, "Services list")
 
-        with patch("agent.start_service", return_value={"message": "Started Spooler"}):
+        with patch("core.agent.start_service", return_value={"message": "Started Spooler"}):
             cont, msg = handle_command("start service Spooler")
             self.assertTrue(cont)
             self.assertEqual(msg, "Started Spooler")
 
-        with patch("agent.stop_service", return_value={"message": "Stopped Spooler"}):
+        with patch("core.agent.stop_service", return_value={"message": "Stopped Spooler"}):
             cont, msg = handle_command("stop service Spooler")
             self.assertTrue(cont)
             self.assertEqual(msg, "Stopped Spooler")
 
-        with patch("agent.restart_service", return_value={"message": "Restarted Spooler"}):
+        with patch("core.agent.restart_service", return_value={"message": "Restarted Spooler"}):
             cont, msg = handle_command("restart service Spooler")
             self.assertTrue(cont)
             self.assertEqual(msg, "Restarted Spooler")
 
-        with patch("agent.get_app_version", return_value={"message": "Node.js v20"}):
+        with patch("core.agent.get_app_version", return_value={"message": "Node.js v20"}):
             cont, msg = handle_command("app version Node.js")
             self.assertTrue(cont)
             self.assertEqual(msg, "Node.js v20")
 
-        with patch("agent.hash_file", return_value={"message": "SHA256: 12345"}):
+        with patch("core.agent.hash_file", return_value={"message": "SHA256: 12345"}):
             cont, msg = handle_command("sha256 app.exe")
             self.assertTrue(cont)
             self.assertEqual(msg, "SHA256: 12345")
 
-        with patch("agent.verify_checksum", return_value={"message": "Checksum MATCHES!"}):
+        with patch("core.agent.verify_checksum", return_value={"message": "Checksum MATCHES!"}):
             cont, msg = handle_command("verify checksum app.zip 12345")
             self.assertTrue(cont)
             self.assertEqual(msg, "Checksum MATCHES!")
 
-        with patch("agent.get_display_info", return_value={"message": "Display 1920x1080"}):
+        with patch("core.agent.get_display_info", return_value={"message": "Display 1920x1080"}):
             cont, msg = handle_command("screen resolution")
             self.assertTrue(cont)
             self.assertEqual(msg, "Display 1920x1080")
 
-        with patch("agent.list_drives", return_value={"message": "Drives list"}):
+        with patch("core.agent.list_drives", return_value={"message": "Drives list"}):
             cont, msg = handle_command("show drives")
             self.assertTrue(cont)
             self.assertEqual(msg, "Drives list")
 
-        with patch("agent.get_removable_drives", return_value={"message": "USB drives list"}):
+        with patch("core.agent.get_removable_drives", return_value={"message": "USB drives list"}):
             cont, msg = handle_command("show usb drives")
             self.assertTrue(cont)
             self.assertEqual(msg, "USB drives list")
@@ -2173,7 +2173,7 @@ class TestSystemAgent(unittest.TestCase):
     # =========================================================================
 
     def test_display_expanded(self):
-        from tools.display import get_monitors_detail, get_display_modes
+        from hands.sensory.display import get_monitors_detail, get_display_modes
         res_monitors = get_monitors_detail()
         self.assertTrue(res_monitors["success"])
         self.assertIn("count", res_monitors)
@@ -2183,15 +2183,15 @@ class TestSystemAgent(unittest.TestCase):
         self.assertIn("refresh_rate_hz", res_modes)
 
     def test_browser_expanded(self):
-        from tools.browser import open_with_browser, open_multiple_urls, get_default_browser
-        with patch("tools.browser.webbrowser.get") as mock_get:
+        from hands.connectivity.browser import open_with_browser, open_multiple_urls, get_default_browser
+        with patch("hands.connectivity.browser.webbrowser.get") as mock_get:
             mock_inst = MagicMock()
             mock_get.return_value = mock_inst
             res = open_with_browser("https://github.com", "chrome")
             self.assertTrue(res["success"])
             self.assertIn("chrome", res["browser"])
 
-        with patch("tools.browser.webbrowser.open", return_value=True):
+        with patch("hands.connectivity.browser.webbrowser.open", return_value=True):
             res_multi = open_multiple_urls(["https://google.com", "https://bing.com"])
             self.assertTrue(res_multi["success"])
             self.assertEqual(res_multi["opened_count"], 2)
@@ -2201,30 +2201,30 @@ class TestSystemAgent(unittest.TestCase):
         self.assertIn("browser", def_browser)
 
     def test_audio_expanded(self):
-        from tools.audio import speak_text, list_audio_devices
-        with patch("tools.audio.subprocess.Popen") as mock_popen:
+        from hands.sensory.audio import speak_text, list_audio_devices
+        with patch("hands.sensory.audio.subprocess.Popen") as mock_popen:
             res = speak_text("Hello from MIO")
             self.assertTrue(res["success"])
             self.assertEqual(res["text"], "Hello from MIO")
 
-        with patch("tools.audio.subprocess.check_output", return_value='[{"Name":"Realtek Audio","Status":"OK"}]'):
+        with patch("hands.sensory.audio.subprocess.check_output", return_value='[{"Name":"Realtek Audio","Status":"OK"}]'):
             res_devs = list_audio_devices()
             self.assertTrue(res_devs["success"])
             self.assertEqual(res_devs["count"], 1)
 
     def test_mouse_expanded(self):
-        from tools.mouse import drag_to, mouse_down, mouse_up, move_relative
-        with patch("tools.mouse.user32.mouse_event"):
+        from hands.action.mouse import drag_to, mouse_down, mouse_up, move_relative
+        with patch("hands.action.mouse.user32.mouse_event"):
             res_down = mouse_down("left")
             self.assertTrue(res_down["success"])
             res_up = mouse_up("left")
             self.assertTrue(res_up["success"])
 
-        with patch("tools.mouse.get_cursor_position", return_value={"success": True, "x": 100, "y": 100}), \
-             patch("tools.mouse.move_cursor", return_value={"success": True, "x": 200, "y": 200}), \
-             patch("tools.mouse.user32.SetCursorPos", return_value=1), \
-             patch("tools.mouse.mouse_down", return_value={"success": True}), \
-             patch("tools.mouse.mouse_up", return_value={"success": True}):
+        with patch("hands.action.mouse.get_cursor_position", return_value={"success": True, "x": 100, "y": 100}), \
+             patch("hands.action.mouse.move_cursor", return_value={"success": True, "x": 200, "y": 200}), \
+             patch("hands.action.mouse.user32.SetCursorPos", return_value=1), \
+             patch("hands.action.mouse.mouse_down", return_value={"success": True}), \
+             patch("hands.action.mouse.mouse_up", return_value={"success": True}):
             res_drag = drag_to(200, 200, steps=2)
             self.assertTrue(res_drag["success"])
 
@@ -2232,7 +2232,7 @@ class TestSystemAgent(unittest.TestCase):
             self.assertTrue(res_rel["success"])
 
     def test_input_expanded(self):
-        from tools.input import (
+        from hands.action.input import (
             open_file_explorer,
             open_windows_settings,
             open_run_dialog,
@@ -2241,7 +2241,7 @@ class TestSystemAgent(unittest.TestCase):
             copy_selection,
             paste_selection,
         )
-        with patch("tools.input.send_hotkey", return_value={"success": True, "message": "OK"}):
+        with patch("hands.action.input.send_hotkey", return_value={"success": True, "message": "OK"}):
             self.assertTrue(open_file_explorer()["success"])
             self.assertTrue(open_windows_settings()["success"])
             self.assertTrue(open_run_dialog()["success"])
@@ -2251,24 +2251,24 @@ class TestSystemAgent(unittest.TestCase):
             self.assertTrue(paste_selection()["success"])
 
     def test_clipboard_expanded(self):
-        from tools.clipboard import append_clipboard_text, get_clipboard_formats
-        with patch("tools.clipboard.get_clipboard_text", return_value={"success": True, "text": "Part 1"}), \
-             patch("tools.clipboard.set_clipboard_text", return_value={"success": True, "message": "OK"}):
+        from hands.action.clipboard import append_clipboard_text, get_clipboard_formats
+        with patch("hands.action.clipboard.get_clipboard_text", return_value={"success": True, "text": "Part 1"}), \
+             patch("hands.action.clipboard.set_clipboard_text", return_value={"success": True, "message": "OK"}):
             res_app = append_clipboard_text(" - Part 2")
             self.assertTrue(res_app["success"])
 
-        with patch("tools.clipboard.user32.OpenClipboard", return_value=True), \
-             patch("tools.clipboard.user32.CloseClipboard", return_value=True), \
-             patch("tools.clipboard.user32.EnumClipboardFormats", side_effect=[13, 0]):
+        with patch("hands.action.clipboard.user32.OpenClipboard", return_value=True), \
+             patch("hands.action.clipboard.user32.CloseClipboard", return_value=True), \
+             patch("hands.action.clipboard.user32.EnumClipboardFormats", side_effect=[13, 0]):
             res_fmts = get_clipboard_formats()
             self.assertTrue(res_fmts["success"])
             self.assertEqual(res_fmts["format_count"], 1)
 
     def test_screen_expanded(self):
-        from tools.screen import take_region_screenshot, get_image_dimensions
-        with patch("tools.screen.subprocess.check_output", return_value=b""), \
-             patch("tools.screen.os.path.exists", return_value=True), \
-             patch("tools.screen.os.path.getsize", return_value=5000):
+        from hands.sensory.screen import take_region_screenshot, get_image_dimensions
+        with patch("hands.sensory.screen.subprocess.check_output", return_value=b""), \
+             patch("hands.sensory.screen.os.path.exists", return_value=True), \
+             patch("hands.sensory.screen.os.path.getsize", return_value=5000):
             res_reg = take_region_screenshot(0, 0, 800, 600, "region.png")
             self.assertTrue(res_reg["success"])
 
@@ -2287,8 +2287,8 @@ class TestSystemAgent(unittest.TestCase):
                 os.remove(tf_path)
 
     def test_notifications_expanded(self):
-        from tools.notifications import beep, play_sound_pattern
-        with patch("tools.notifications.winsound.Beep"):
+        from hands.sensory.notifications import beep, play_sound_pattern
+        with patch("hands.sensory.notifications.winsound.Beep"):
             self.assertTrue(beep(1000, 100)["success"])
             self.assertTrue(play_sound_pattern("success")["success"])
             self.assertTrue(play_sound_pattern("error")["success"])
@@ -2296,28 +2296,28 @@ class TestSystemAgent(unittest.TestCase):
             self.assertFalse(play_sound_pattern("nonexistent")["success"])
 
     def test_settings_expanded(self):
-        from tools.settings import get_wallpaper, set_wallpaper, set_transparency_effects
-        with patch("tools.settings.user32.SystemParametersInfoW", return_value=1):
+        from hands.connectivity.settings import get_wallpaper, set_wallpaper, set_transparency_effects
+        with patch("hands.connectivity.settings.user32.SystemParametersInfoW", return_value=1):
             res_get = get_wallpaper()
             self.assertTrue(res_get["success"])
 
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tf:
             wall_path = tf.name
         try:
-            with patch("tools.settings.user32.SystemParametersInfoW", return_value=1):
+            with patch("hands.connectivity.settings.user32.SystemParametersInfoW", return_value=1):
                 res_set = set_wallpaper(wall_path)
                 self.assertTrue(res_set["success"])
         finally:
             if os.path.exists(wall_path):
                 os.remove(wall_path)
 
-        with patch("tools.settings.winreg.OpenKey"), \
-             patch("tools.settings.winreg.SetValueEx"):
+        with patch("hands.connectivity.settings.winreg.OpenKey"), \
+             patch("hands.connectivity.settings.winreg.SetValueEx"):
             res_trans = set_transparency_effects(True)
             self.assertTrue(res_trans["success"])
 
     def test_power_expanded(self):
-        from tools.power import (
+        from hands.connectivity.power import (
             sleep_system,
             hibernate_system,
             schedule_shutdown,
@@ -2325,41 +2325,41 @@ class TestSystemAgent(unittest.TestCase):
             cancel_shutdown,
             get_active_power_plan,
         )
-        with patch("tools.power.ctypes.windll.powrprof.SetSuspendState", return_value=1):
+        with patch("hands.connectivity.power.ctypes.windll.powrprof.SetSuspendState", return_value=1):
             self.assertTrue(sleep_system()["success"])
             self.assertTrue(hibernate_system()["success"])
 
-        with patch("tools.power.subprocess.check_output", return_value=b""):
+        with patch("hands.connectivity.power.subprocess.check_output", return_value=b""):
             self.assertTrue(schedule_shutdown(60)["success"])
             self.assertTrue(schedule_restart(60)["success"])
             self.assertTrue(cancel_shutdown()["success"])
 
-        with patch("tools.power.subprocess.check_output", return_value="Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)"):
+        with patch("hands.connectivity.power.subprocess.check_output", return_value="Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)"):
             plan_res = get_active_power_plan()
             self.assertTrue(plan_res["success"])
             self.assertEqual(plan_res["plan"], "Balanced")
 
     def test_brightness_expanded(self):
-        from tools.brightness import fade_brightness
-        with patch("tools.brightness.get_brightness", return_value={"success": True, "brightness": 20}), \
-             patch("tools.brightness.set_brightness", return_value={"success": True, "brightness": 60}):
+        from hands.sensory.brightness import fade_brightness
+        with patch("hands.sensory.brightness.get_brightness", return_value={"success": True, "brightness": 20}), \
+             patch("hands.sensory.brightness.set_brightness", return_value={"success": True, "brightness": 60}):
             res_fade = fade_brightness(60, steps=2)
             self.assertTrue(res_fade["success"])
 
     def test_services_expanded(self):
-        from tools.services import set_service_startup, get_service_description
-        with patch("tools.services.subprocess.check_output", return_value="[SC] ChangeServiceConfig SUCCESS"):
+        from hands.connectivity.services import set_service_startup, get_service_description
+        with patch("hands.connectivity.services.subprocess.check_output", return_value="[SC] ChangeServiceConfig SUCCESS"):
             res_start = set_service_startup("Spooler", "auto")
             self.assertTrue(res_start["success"])
 
-        with patch("tools.services.subprocess.check_output", return_value="SERVICE_NAME: Spooler\nDESCRIPTION: Print Spooler Service"):
+        with patch("hands.connectivity.services.subprocess.check_output", return_value="SERVICE_NAME: Spooler\nDESCRIPTION: Print Spooler Service"):
             res_desc = get_service_description("Spooler")
             self.assertTrue(res_desc["success"])
             self.assertIn("Print Spooler", res_desc["description"])
 
     def test_drives_expanded(self):
-        from tools.drives import check_drive_space_warning, eject_usb_drive
-        with patch("tools.drives.list_drives", return_value={
+        from hands.storage.drives import check_drive_space_warning, eject_usb_drive
+        with patch("hands.storage.drives.list_drives", return_value={
             "success": True,
             "drives": [{"device": "C:\\", "used_percent": 95, "free_gb": 5, "total_gb": 100}]
         }):
@@ -2367,27 +2367,27 @@ class TestSystemAgent(unittest.TestCase):
             self.assertTrue(res_warn["success"])
             self.assertTrue(res_warn["has_warnings"])
 
-        with patch("tools.drives.subprocess.check_output", return_value="Ejected"):
+        with patch("hands.storage.drives.subprocess.check_output", return_value="Ejected"):
             res_ej = eject_usb_drive("E")
             self.assertTrue(res_ej["success"])
 
     def test_wifi_expanded(self):
-        from tools.wifi_tools import connect_to_wifi, disconnect_wifi, delete_wifi_profile
-        with patch("tools.wifi_tools.subprocess.check_output", return_value="Connection request was completed successfully."):
+        from hands.connectivity.wifi_tools import connect_to_wifi, disconnect_wifi, delete_wifi_profile
+        with patch("hands.connectivity.wifi_tools.subprocess.check_output", return_value="Connection request was completed successfully."):
             res_conn = connect_to_wifi("HomeWifi")
             self.assertTrue(res_conn["success"])
 
-        with patch("tools.wifi_tools.subprocess.check_output", return_value="Disconnected"):
+        with patch("hands.connectivity.wifi_tools.subprocess.check_output", return_value="Disconnected"):
             res_disc = disconnect_wifi()
             self.assertTrue(res_disc["success"])
 
-        with patch("tools.wifi_tools.subprocess.check_output", return_value="Profile 'OldWifi' is deleted from interface."):
+        with patch("hands.connectivity.wifi_tools.subprocess.check_output", return_value="Profile 'OldWifi' is deleted from interface."):
             res_del = delete_wifi_profile("OldWifi")
             self.assertTrue(res_del["success"])
 
     def test_network_expanded(self):
-        from tools.network import get_public_ip
-        with patch("tools.network.urllib.request.urlopen") as mock_open:
+        from hands.connectivity.network import get_public_ip
+        with patch("hands.connectivity.network.urllib.request.urlopen") as mock_open:
             mock_resp = MagicMock()
             mock_resp.read.return_value = b'{"ip": "203.0.113.195"}'
             mock_resp.__enter__.return_value = mock_resp
@@ -2397,14 +2397,14 @@ class TestSystemAgent(unittest.TestCase):
             self.assertEqual(res_ip["public_ip"], "203.0.113.195")
 
     def test_ports_expanded(self):
-        from tools.ports import kill_port_process, scan_remote_port
-        with patch("tools.ports.what_is_using_port", return_value={
+        from hands.connectivity.ports import kill_port_process, scan_remote_port
+        with patch("hands.connectivity.ports.what_is_using_port", return_value={
             "success": True, "in_use": True, "pid": 4321, "process_name": "server.exe"
-        }), patch("tools.ports.subprocess.check_output", return_value="SUCCESS"):
+        }), patch("hands.connectivity.ports.subprocess.check_output", return_value="SUCCESS"):
             res_kill = kill_port_process(3000)
             self.assertTrue(res_kill["success"])
 
-        with patch("tools.ports.socket.socket") as mock_sock:
+        with patch("hands.connectivity.ports.socket.socket") as mock_sock:
             mock_inst = MagicMock()
             mock_inst.connect_ex.return_value = 0
             mock_sock.return_value = mock_inst
@@ -2413,20 +2413,20 @@ class TestSystemAgent(unittest.TestCase):
             self.assertTrue(res_scan["is_open"])
 
     def test_system_info_expanded(self):
-        from tools.system_info import get_cpu_details, get_motherboard_info
-        with patch("tools.system_info.subprocess.check_output", return_value='[{"Name":"Intel Core i9","NumberOfCores":16,"NumberOfLogicalProcessors":24,"MaxClockSpeed":5800}]'):
+        from hands.connectivity.system_info import get_cpu_details, get_motherboard_info
+        with patch("hands.connectivity.system_info.subprocess.check_output", return_value='[{"Name":"Intel Core i9","NumberOfCores":16,"NumberOfLogicalProcessors":24,"MaxClockSpeed":5800}]'):
             res_cpu = get_cpu_details()
             self.assertTrue(res_cpu["success"])
             self.assertEqual(res_cpu["cores"], 16)
 
-        with patch("tools.system_info.subprocess.check_output", return_value='[{"Manufacturer":"ASUS","Product":"ROG MAXIMUS","SerialNumber":"12345"}]'):
+        with patch("hands.connectivity.system_info.subprocess.check_output", return_value='[{"Manufacturer":"ASUS","Product":"ROG MAXIMUS","SerialNumber":"12345"}]'):
             res_mb = get_motherboard_info()
             self.assertTrue(res_mb["success"])
             self.assertEqual(res_mb["motherboard"]["Manufacturer"], "ASUS")
 
     def test_hasher_expanded(self):
         import hashlib
-        from tools.hasher import hash_text, compare_files
+        from hands.storage.hasher import hash_text, compare_files
         res_hash = hash_text("Hello World", "sha256")
         self.assertTrue(res_hash["success"])
         self.assertEqual(res_hash["hash"], hashlib.sha256(b"Hello World").hexdigest())
@@ -2447,7 +2447,7 @@ class TestSystemAgent(unittest.TestCase):
                     os.remove(f2.name)
 
     def test_archive_expanded(self):
-        from tools.archive import create_tar, test_archive
+        from hands.storage.archive import create_tar, test_archive
         with tempfile.TemporaryDirectory() as tmpdir:
             src_file = os.path.join(tmpdir, "sample.txt")
             with open(src_file, "w") as f:
@@ -2463,8 +2463,8 @@ class TestSystemAgent(unittest.TestCase):
             self.assertTrue(res_test["valid"])
 
     def test_installed_apps_expanded(self):
-        from tools.installed_apps import get_app_uninstall_command
-        with patch("tools.installed_apps.list_installed_software", return_value={
+        from hands.control.installed_apps import get_app_uninstall_command
+        with patch("hands.control.installed_apps.list_installed_software", return_value={
             "success": True,
             "apps": [{"name": "Sample App", "uninstall_string": "MsiExec.exe /X{12345}"}]
         }):
@@ -2473,27 +2473,27 @@ class TestSystemAgent(unittest.TestCase):
             self.assertIn("MsiExec.exe", res_cmd["uninstall_string"])
 
     def test_processes_expanded(self):
-        from tools.processes import kill_process, get_top_processes
-        with patch("tools.processes.subprocess.check_output", return_value="SUCCESS: The process has been terminated."):
+        from hands.control.processes import kill_process, get_top_processes
+        with patch("hands.control.processes.subprocess.check_output", return_value="SUCCESS: The process has been terminated."):
             res_kill = kill_process("notepad.exe")
             self.assertTrue(res_kill["success"])
 
         fake_tasklist = '"node.exe","1000","Console","1","50,000 K"\r\n"chrome.exe","2000","Console","1","100,000 K"\r\n'
-        with patch("tools.processes.subprocess.check_output", return_value=fake_tasklist):
+        with patch("hands.control.processes.subprocess.check_output", return_value=fake_tasklist):
             res_top = get_top_processes(2)
             self.assertTrue(res_top["success"])
             self.assertEqual(len(res_top["top_processes"]), 2)
 
     def test_windows_expanded(self):
-        from tools.windows import move_and_resize_window, snap_window, set_always_on_top
+        from hands.control.windows import move_and_resize_window, snap_window, set_always_on_top
         fake_wins = [{"hwnd": 999, "title": "Test Window", "pid": 111, "state": "normal"}]
-        with patch("tools.windows._get_all_windows", return_value=fake_wins), \
-             patch("tools.windows.user32.MoveWindow", return_value=1), \
-             patch("tools.windows.user32.SetWindowPos", return_value=1):
+        with patch("hands.control.windows._get_all_windows", return_value=fake_wins), \
+             patch("hands.control.windows.user32.MoveWindow", return_value=1), \
+             patch("hands.control.windows.user32.SetWindowPos", return_value=1):
             res_mv = move_and_resize_window("Test Window", 10, 10, 800, 600)
             self.assertTrue(res_mv["success"])
 
-            with patch("tools.windows.user32.GetSystemMetrics", side_effect=[1920, 1080]):
+            with patch("hands.control.windows.user32.GetSystemMetrics", side_effect=[1920, 1080]):
                 res_snap = snap_window("Test Window", "left")
                 self.assertTrue(res_snap["success"])
 
@@ -2501,7 +2501,7 @@ class TestSystemAgent(unittest.TestCase):
             self.assertTrue(res_top["success"])
 
     def test_filesystem_expanded(self):
-        from tools.filesystem import read_file_head, read_file_tail, get_folder_size
+        from hands.storage.filesystem import read_file_head, read_file_tail, get_folder_size
         with tempfile.NamedTemporaryFile("w+", delete=False) as tf:
             tf.write("line 1\nline 2\nline 3\nline 4\nline 5\n")
             tf_path = tf.name
@@ -2522,7 +2522,7 @@ class TestSystemAgent(unittest.TestCase):
                 os.remove(tf_path)
 
     def test_timer_expanded(self):
-        from tools.timer import start_stopwatch, lap_stopwatch, stop_stopwatch
+        from hands.connectivity.timer import start_stopwatch, lap_stopwatch, stop_stopwatch
         res_start = start_stopwatch("task_timer")
         self.assertTrue(res_start["success"])
 
@@ -2534,71 +2534,71 @@ class TestSystemAgent(unittest.TestCase):
         self.assertIn("elapsed_seconds", res_stop)
 
     def test_applications_expanded(self):
-        from tools.applications import open_application_as_admin, open_file_with_default_app
-        with patch("tools.applications.ctypes.windll.shell32.ShellExecuteW", return_value=42), \
-             patch("tools.filesystem.locate_executable", return_value={"success": True, "matches": ["C:\\Windows\\notepad.exe"]}):
+        from hands.control.applications import open_application_as_admin, open_file_with_default_app
+        with patch("hands.control.applications.ctypes.windll.shell32.ShellExecuteW", return_value=42), \
+             patch("hands.storage.filesystem.locate_executable", return_value={"success": True, "matches": ["C:\\Windows\\notepad.exe"]}):
             res_admin = open_application_as_admin("notepad")
             self.assertTrue(res_admin["success"])
 
-        with patch("tools.applications.os.path.exists", return_value=True), \
-             patch("tools.applications.os.startfile"):
+        with patch("hands.control.applications.os.path.exists", return_value=True), \
+             patch("hands.control.applications.os.startfile"):
             res_file = open_file_with_default_app("C:\\file.txt")
             self.assertTrue(res_file["success"])
 
     def test_agent_command_dispatch_expanded(self):
-        from agent import handle_command
-        with patch("agent.get_cpu_details", return_value={"message": "CPU details 16 cores"}):
+        from core.agent import handle_command
+        with patch("core.agent.get_cpu_details", return_value={"message": "CPU details 16 cores"}):
             cont, msg = handle_command("cpu details")
             self.assertTrue(cont)
             self.assertEqual(msg, "CPU details 16 cores")
 
-        with patch("agent.get_motherboard_info", return_value={"message": "ASUS Motherboard"}):
+        with patch("core.agent.get_motherboard_info", return_value={"message": "ASUS Motherboard"}):
             cont, msg = handle_command("motherboard info")
             self.assertTrue(cont)
             self.assertEqual(msg, "ASUS Motherboard")
 
-        with patch("agent.kill_port_process", return_value={"message": "Port 3000 freed"}):
+        with patch("core.agent.kill_port_process", return_value={"message": "Port 3000 freed"}):
             cont, msg = handle_command("kill port 3000")
             self.assertTrue(cont)
             self.assertEqual(msg, "Port 3000 freed")
 
-        with patch("agent.get_public_ip", return_value={"message": "Public IP: 1.2.3.4"}):
+        with patch("core.agent.get_public_ip", return_value={"message": "Public IP: 1.2.3.4"}):
             cont, msg = handle_command("public ip")
             self.assertTrue(cont)
             self.assertEqual(msg, "Public IP: 1.2.3.4")
 
-        with patch("agent.snap_window", return_value={"message": "Snapped left"}):
+        with patch("core.agent.snap_window", return_value={"message": "Snapped left"}):
             cont, msg = handle_command("snap left notepad")
             self.assertTrue(cont)
             self.assertEqual(msg, "Snapped left")
 
-        with patch("agent.set_always_on_top", return_value={"message": "Pinned on top"}):
+        with patch("core.agent.set_always_on_top", return_value={"message": "Pinned on top"}):
             cont, msg = handle_command("pin on top notepad")
             self.assertTrue(cont)
             self.assertEqual(msg, "Pinned on top")
 
-        with patch("agent.get_top_processes", return_value={"message": "Top processes list"}):
+        with patch("core.agent.get_top_processes", return_value={"message": "Top processes list"}):
             cont, msg = handle_command("top processes")
             self.assertTrue(cont)
             self.assertEqual(msg, "Top processes list")
 
-        with patch("agent.kill_process", return_value={"message": "Process killed"}):
+        with patch("core.agent.kill_process", return_value={"message": "Process killed"}):
             cont, msg = handle_command("kill process notepad")
             self.assertTrue(cont)
             self.assertEqual(msg, "Process killed")
 
-        with patch("agent.open_application_as_admin", return_value={"message": "Opened as admin"}):
+        with patch("core.agent.open_application_as_admin", return_value={"message": "Opened as admin"}):
             cont, msg = handle_command("run as admin powershell")
             self.assertTrue(cont)
             self.assertEqual(msg, "Opened as admin")
 
-        with patch("agent.open_file_with_default_app", return_value={"message": "Opened file"}):
+        with patch("core.agent.open_file_with_default_app", return_value={"message": "Opened file"}):
             cont, msg = handle_command("open file doc.pdf")
             self.assertTrue(cont)
             self.assertEqual(msg, "Opened file")
 
     def test_healer_tools(self):
-        from tools.healer import (
+        from hands.connectivity.healer import (
             trim_process_memory,
             trim_all_memory,
             detect_hung_windows,
@@ -2609,25 +2609,25 @@ class TestSystemAgent(unittest.TestCase):
         )
 
         # 1. trim_process_memory
-        with patch("tools.healer.kernel32.OpenProcess", return_value=9999), \
-             patch("tools.healer.psapi.EmptyWorkingSet", return_value=1), \
-             patch("tools.healer.kernel32.CloseHandle"):
+        with patch("hands.connectivity.healer.kernel32.OpenProcess", return_value=9999), \
+             patch("hands.connectivity.healer.psapi.EmptyWorkingSet", return_value=1), \
+             patch("hands.connectivity.healer.kernel32.CloseHandle"):
             res = trim_process_memory(1234)
             self.assertTrue(res["success"])
             self.assertIn("Successfully trimmed", res["message"])
 
         # 2. trim_all_memory
         fake_tasklist = '"notepad.exe","1234","Console","1","10,000 K"\n"chrome.exe","5678","Console","1","50,000 K"\n'
-        with patch("tools.system_info.get_ram_usage", side_effect=[{"used_gb": 12.0}, {"used_gb": 9.5}]), \
+        with patch("hands.connectivity.system_info.get_ram_usage", side_effect=[{"used_gb": 12.0}, {"used_gb": 9.5}]), \
              patch("subprocess.check_output", return_value=fake_tasklist), \
-             patch("tools.healer.trim_process_memory", return_value={"success": True}):
+             patch("hands.connectivity.healer.trim_process_memory", return_value={"success": True}):
             res_all = trim_all_memory()
             self.assertTrue(res_all["success"])
             self.assertEqual(res_all["processes_trimmed"], 2)
             self.assertEqual(res_all["reclaimed_gb"], 2.5)
 
         # 3. detect_hung_windows
-        with patch("tools.healer.user32.EnumWindows") as mock_enum:
+        with patch("hands.connectivity.healer.user32.EnumWindows") as mock_enum:
             def fake_enum(cb, _):
                 # Call callback to simulate no hung windows
                 return True
@@ -2647,8 +2647,8 @@ class TestSystemAgent(unittest.TestCase):
             self.assertTrue(res_net["internet_reachable"])
 
         # 5. heal_stuck_ports
-        with patch("tools.ports.what_is_using_port", return_value={"success": True, "in_use": True, "pid": 4321, "process_name": "node.exe"}), \
-             patch("tools.ports.kill_port_process", return_value={"success": True}):
+        with patch("hands.connectivity.ports.what_is_using_port", return_value={"success": True, "in_use": True, "pid": 4321, "process_name": "node.exe"}), \
+             patch("hands.connectivity.ports.kill_port_process", return_value={"success": True}):
             res_ports = heal_stuck_ports([3000])
             self.assertTrue(res_ports["success"])
             self.assertEqual(res_ports["healed_count"], 1)
@@ -2666,50 +2666,50 @@ class TestSystemAgent(unittest.TestCase):
             self.assertEqual(res_temp["freed_mb"], 5.0)
 
         # 7. auto_heal_system
-        with patch("tools.healer.trim_all_memory", return_value={"message": "Trimmed 5 GB"}), \
-             patch("tools.healer.heal_network", return_value={"message": "DNS Flushed"}), \
-             patch("tools.healer.detect_hung_windows", return_value={"message": "0 frozen"}), \
-             patch("tools.healer.heal_temp_cache", return_value={"message": "Cleared 200 MB"}):
+        with patch("hands.connectivity.healer.trim_all_memory", return_value={"message": "Trimmed 5 GB"}), \
+             patch("hands.connectivity.healer.heal_network", return_value={"message": "DNS Flushed"}), \
+             patch("hands.connectivity.healer.detect_hung_windows", return_value={"message": "0 frozen"}), \
+             patch("hands.connectivity.healer.heal_temp_cache", return_value={"message": "Cleared 200 MB"}):
             res_auto = auto_heal_system()
             self.assertTrue(res_auto["success"])
             self.assertIn("System Self-Healing Complete", res_auto["message"])
 
     def test_healer_agent_dispatch(self):
-        from agent import handle_command
-        with patch("agent.auto_heal_system", return_value={"message": "System fully healed"}):
+        from core.agent import handle_command
+        with patch("core.agent.auto_heal_system", return_value={"message": "System fully healed"}):
             cont, msg = handle_command("auto heal")
             self.assertTrue(cont)
             self.assertEqual(msg, "System fully healed")
 
-        with patch("agent.trim_all_memory", return_value={"message": "Freed 3 GB RAM"}):
+        with patch("core.agent.trim_all_memory", return_value={"message": "Freed 3 GB RAM"}):
             cont, msg = handle_command("trim ram")
             self.assertTrue(cont)
             self.assertEqual(msg, "Freed 3 GB RAM")
 
-        with patch("agent.heal_network", return_value={"message": "DNS Cache flushed"}):
+        with patch("core.agent.heal_network", return_value={"message": "DNS Cache flushed"}):
             cont, msg = handle_command("heal network")
             self.assertTrue(cont)
             self.assertEqual(msg, "DNS Cache flushed")
 
-        with patch("agent.detect_hung_windows", return_value={"message": "No hung windows"}):
+        with patch("core.agent.detect_hung_windows", return_value={"message": "No hung windows"}):
             cont, msg = handle_command("check frozen apps")
             self.assertTrue(cont)
             self.assertEqual(msg, "No hung windows")
 
-        with patch("agent.heal_temp_cache", return_value={"message": "Cleared 120 MB temp files"}):
+        with patch("core.agent.heal_temp_cache", return_value={"message": "Cleared 120 MB temp files"}):
             cont, msg = handle_command("heal cache")
             self.assertTrue(cont)
             self.assertEqual(msg, "Cleared 120 MB temp files")
 
     def test_youtube_tools(self):
-        from tools.browser import (
+        from hands.connectivity.browser import (
             parse_timestamp,
             open_youtube,
             search_and_play_youtube,
             control_youtube,
             open_youtube_and_type,
         )
-        from tools.input import press_key
+        from hands.action.input import press_key
 
         # Timestamp parsing tests
         self.assertEqual(parse_timestamp("2 minute"), 120)
@@ -2722,7 +2722,7 @@ class TestSystemAgent(unittest.TestCase):
         self.assertEqual(parse_timestamp(120), 120)
 
         # open_youtube
-        with patch("tools.browser.webbrowser.open") as mock_open:
+        with patch("hands.connectivity.browser.webbrowser.open") as mock_open:
             res_hp = open_youtube()
             self.assertTrue(res_hp["success"])
             self.assertEqual(res_hp["mode"], "homepage")
@@ -2740,13 +2740,13 @@ class TestSystemAgent(unittest.TestCase):
             self.assertIn("&t=120s", res_vid["url"])
 
         # search_and_play_youtube
-        with patch("tools.browser.webbrowser.open"):
+        with patch("hands.connectivity.browser.webbrowser.open"):
             res_sp = search_and_play_youtube("interstellar theme", timestamp="1:45")
             self.assertTrue(res_sp["success"])
             self.assertEqual(res_sp["timestamp_seconds"], 105)
 
         # control_youtube
-        with patch("tools.input.send_hotkey", return_value={"success": True}):
+        with patch("hands.action.input.send_hotkey", return_value={"success": True}):
             res_ctrl = control_youtube("play")
             self.assertTrue(res_ctrl["success"])
             self.assertEqual(res_ctrl["key"], "k")
@@ -2760,16 +2760,16 @@ class TestSystemAgent(unittest.TestCase):
             self.assertEqual(res_mute["key"], "m")
 
         # press_key
-        with patch("tools.input.send_hotkey", return_value={"success": True}) as mock_hk:
+        with patch("hands.action.input.send_hotkey", return_value={"success": True}) as mock_hk:
             res_pk = press_key("enter")
             self.assertTrue(res_pk["success"])
             mock_hk.assert_called_with(["enter"])
 
     def test_youtube_agent_command_dispatch(self):
-        from agent import handle_command
+        from core.agent import handle_command
 
-        with patch("tools.browser.webbrowser.open"), \
-             patch("tools.browser.get_top_youtube_video_id", return_value="W0DM5lcj6mw"):
+        with patch("hands.connectivity.browser.webbrowser.open"), \
+             patch("hands.connectivity.browser.get_top_youtube_video_id", return_value="W0DM5lcj6mw"):
             # The core user requirement: "open youtube type this and play video at 2 minute"
             cont, msg = handle_command("open youtube type this and play video at 2 minute")
             self.assertTrue(cont)
@@ -2797,14 +2797,14 @@ class TestSystemAgent(unittest.TestCase):
             self.assertIn("fullscreen", msg)
 
             # Press key
-            with patch("agent.press_key", return_value={"message": "Pressed key 'enter'."}):
+            with patch("core.agent.press_key", return_value={"message": "Pressed key 'enter'."}):
                 cont, msg = handle_command("press key enter")
                 self.assertTrue(cont)
                 self.assertEqual(msg, "Pressed key 'enter'.")
 
     def test_web_and_compound_search_dispatch(self):
-        from agent import handle_command
-        with patch("tools.browser.webbrowser.open"):
+        from core.agent import handle_command
+        with patch("hands.connectivity.browser.webbrowser.open"):
             # Compound search: "open google in browser and search for ai news"
             cont, msg = handle_command("open google in browser and search for ai news")
             self.assertTrue(cont)

@@ -16,18 +16,18 @@ for _p in [_ROOT_DIR, _CORE_DIR]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from tools.applications import (
+from hands.control.applications import (
     open_application,
     open_application_as_admin,
     open_file_with_default_app,
 )
-from tools.processes import (
+from hands.control.processes import (
     get_running_applications,
     is_application_running,
     kill_process,
     get_top_processes,
 )
-from tools.filesystem import (
+from hands.storage.filesystem import (
     list_files,
     find_file_or_folder,
     create_folder,
@@ -40,7 +40,7 @@ from tools.filesystem import (
     read_file_tail,
     get_folder_size,
 )
-from tools.windows import (
+from hands.control.windows import (
     list_windows,
     minimize_window,
     maximize_window,
@@ -51,7 +51,7 @@ from tools.windows import (
     snap_window,
     set_always_on_top,
 )
-from tools.system_info import (
+from hands.connectivity.system_info import (
     get_system_info,
     get_cpu_usage,
     get_cpu_details,
@@ -61,13 +61,13 @@ from tools.system_info import (
     get_gpu_usage,
     get_motherboard_info,
 )
-from tools.ports import (
+from hands.connectivity.ports import (
     get_listening_ports,
     what_is_using_port,
     is_port_free,
     kill_port_process,
 )
-from tools.network import (
+from hands.connectivity.network import (
     get_network_info,
     get_ip_address,
     get_public_ip,
@@ -75,7 +75,7 @@ from tools.network import (
     is_connected_to_internet,
     ping_host,
 )
-from tools.audio import (
+from hands.sensory.audio import (
     set_volume,
     volume_up,
     volume_down,
@@ -87,14 +87,14 @@ from tools.audio import (
     speak_text,
     list_audio_devices,
 )
-from tools.clipboard import (
+from hands.action.clipboard import (
     get_clipboard_text,
     set_clipboard_text,
     append_clipboard_text,
     clear_clipboard,
     get_clipboard_formats,
 )
-from tools.input import (
+from hands.action.input import (
     show_desktop,
     open_task_manager,
     switch_app_alt_tab,
@@ -106,7 +106,7 @@ from tools.input import (
     type_text,
     press_key,
 )
-from tools.power import (
+from hands.connectivity.power import (
     lock_workstation,
     turn_off_screen,
     sleep_system,
@@ -116,17 +116,17 @@ from tools.power import (
     get_active_power_plan,
     get_battery_status,
 )
-from tools.screen import (
+from hands.sensory.screen import (
     take_screenshot,
     take_region_screenshot,
 )
-from tools.notifications import (
+from hands.sensory.notifications import (
     play_chime,
     beep,
     play_sound_pattern,
     show_notification,
 )
-from tools.browser import (
+from hands.connectivity.browser import (
     open_url,
     search_web,
     open_incognito,
@@ -140,7 +140,7 @@ from tools.browser import (
     open_website,
     POPULAR_SITES,
 )
-from tools.mouse import (
+from hands.action.mouse import (
     get_cursor_position,
     move_cursor,
     move_relative,
@@ -150,14 +150,14 @@ from tools.mouse import (
     double_click,
     mouse_scroll,
 )
-from tools.archive import (
+from hands.storage.archive import (
     create_zip,
     extract_zip,
     list_zip_contents,
     create_tar,
     test_archive,
 )
-from tools.settings import (
+from hands.connectivity.settings import (
     get_theme_mode,
     set_theme_mode,
     get_accent_color,
@@ -165,7 +165,7 @@ from tools.settings import (
     set_wallpaper,
     set_transparency_effects,
 )
-from tools.timer import (
+from hands.connectivity.timer import (
     get_system_uptime,
     start_timer,
     list_active_timers,
@@ -173,14 +173,14 @@ from tools.timer import (
     lap_stopwatch,
     stop_stopwatch,
 )
-from tools.brightness import (
+from hands.sensory.brightness import (
     get_brightness,
     set_brightness,
     increase_brightness,
     decrease_brightness,
     fade_brightness,
 )
-from tools.wifi_tools import (
+from hands.connectivity.wifi_tools import (
     get_saved_wifi_profiles,
     get_wifi_password,
     scan_wifi_networks,
@@ -189,7 +189,7 @@ from tools.wifi_tools import (
     delete_wifi_profile,
     flush_dns_cache,
 )
-from tools.services import (
+from hands.connectivity.services import (
     list_services,
     get_service_status,
     start_service,
@@ -198,29 +198,29 @@ from tools.services import (
     set_service_startup,
     get_service_description,
 )
-from tools.installed_apps import (
+from hands.control.installed_apps import (
     list_installed_software,
     get_app_version,
     get_app_uninstall_command,
 )
-from tools.hasher import (
+from hands.storage.hasher import (
     hash_file,
     hash_text,
     verify_checksum,
     compare_files,
 )
-from tools.display import (
+from hands.sensory.display import (
     get_display_info,
     get_monitors_detail,
     get_display_modes,
 )
-from tools.drives import (
+from hands.storage.drives import (
     list_drives,
     get_removable_drives,
     check_drive_space_warning,
     eject_usb_drive,
 )
-from tools.healer import (
+from hands.connectivity.healer import (
     auto_heal_system,
     trim_all_memory,
     detect_hung_windows,

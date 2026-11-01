@@ -61,7 +61,7 @@ def _timer_worker(seconds: int, label: str):
     time.sleep(seconds)
     _active_timers.pop(label, None)
     try:
-        from tools.notifications import show_notification
+        from hands.sensory.notifications import show_notification
         show_notification(f"Timer Alert: {label}", f"Your timer for {seconds} seconds has completed!", with_chime=True)
     except Exception:
         pass

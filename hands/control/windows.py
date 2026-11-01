@@ -8,8 +8,8 @@ try:
 except AttributeError:
     user32 = None
 
-from tools.processes import get_running_applications, is_application_running
-from tools.applications import open_application
+from hands.control.processes import get_running_applications, is_application_running
+from hands.control.applications import open_application
 
 
 SW_SHOWNORMAL = 1
@@ -83,7 +83,7 @@ def _get_all_windows() -> list[dict]:
 
 def _match_windows_for_query(query: str, windows: list[dict]) -> list[dict]:
     """Matches windows against a query (by process name, friendly app name, or window title)."""
-    from tools.processes import get_running_applications, KNOWN_PROCESS_NAMES
+    from hands.control.processes import get_running_applications, KNOWN_PROCESS_NAMES
 
     norm_query = query.strip().lower()
     if not norm_query:
@@ -300,7 +300,7 @@ def close_application(app_name: str) -> dict:
 
     if not matched:
         # Check if running application without window
-        from tools.processes import is_application_running
+        from hands.control.processes import is_application_running
         run_check = is_application_running(clean_app)
         if not run_check.get("running"):
             return {
@@ -344,8 +344,8 @@ def restart_application(app_name: str) -> dict:
     if not clean_app:
         return {"success": False, "message": "Please specify an application to restart."}
 
-    from tools.applications import open_application
-    from tools.processes import is_application_running
+    from hands.control.applications import open_application
+    from hands.control.processes import is_application_running
 
     close_res = close_application(clean_app)
     if not close_res.get("success"):

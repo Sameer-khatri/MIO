@@ -60,7 +60,7 @@ def trim_all_memory() -> dict:
     """
     try:
         # Get before memory
-        from tools.system_info import get_ram_usage
+        from hands.connectivity.system_info import get_ram_usage
         before_ram = get_ram_usage()
         before_used = before_ram.get("used_gb", 0.0)
 
@@ -174,7 +174,7 @@ def heal_stuck_ports(ports: list[int] = None) -> dict:
     any blocking or orphaned processes holding them.
     """
     target_ports = ports or [3000, 5000, 8000, 8080]
-    from tools.ports import what_is_using_port, kill_port_process
+    from hands.connectivity.ports import what_is_using_port, kill_port_process
 
     healed_ports = []
     for p in target_ports:

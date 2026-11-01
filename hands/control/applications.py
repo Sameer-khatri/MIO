@@ -635,7 +635,7 @@ def open_application_as_admin(raw_query: str) -> dict:
         return {"success": False, "message": "Application name is required."}
 
     # Locate target
-    from tools.filesystem import locate_executable
+    from hands.storage.filesystem import locate_executable
     loc = locate_executable(clean_q)
     target = clean_q
     if loc.get("success") and loc.get("matches"):

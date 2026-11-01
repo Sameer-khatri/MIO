@@ -634,7 +634,7 @@ class AegisDoctor:
         # 1. RAM Trim
         if target in ("ram", "all"):
             try:
-                from agents.system_agent.tools.healer import trim_all_memory
+                from hands.connectivity.healer import trim_all_memory
                 results["ram"] = trim_all_memory()
             except ImportError:
                 results["ram"] = self._fallback_trim_ram()
@@ -650,7 +650,7 @@ class AegisDoctor:
         # 3. Cache Purge
         if target in ("cache", "all"):
             try:
-                from agents.system_agent.tools.healer import heal_temp_cache
+                from hands.connectivity.healer import heal_temp_cache
                 results["cache"] = heal_temp_cache()
             except ImportError:
                 results["cache"] = self._fallback_heal_cache()

@@ -38,7 +38,7 @@ def resolve_location(location_name: str) -> str | None:
 
 def resolve_destination(query: str) -> dict:
     """Resolve a real destination folder without trusting unresolved paths or memory."""
-    from tools.applications import (
+    from hands.control.applications import (
         find_in_memory,
         forget_memory,
         load_memory,
@@ -181,7 +181,7 @@ def list_files(location: str) -> dict:
 
 def find_file_or_folder(query: str, max_depth: int = 3) -> dict:
     """Searches user folders and repository area for matching files or folders."""
-    from tools.applications import (
+    from hands.control.applications import (
         find_in_memory,
         forget_memory,
         load_memory,
@@ -358,7 +358,7 @@ def create_folder(folder_name: str, location: str) -> dict:
 
 def copy_file_or_folder(source_query: str, location: str) -> dict:
     """Copies one discovered file or folder into a resolved destination without overwriting."""
-    from tools.applications import remember_path
+    from hands.control.applications import remember_path
 
     if not source_query or not isinstance(source_query, str):
         return {
@@ -532,7 +532,7 @@ def _resolve_single_source(source_query: str, excluded_destination_root: str | N
 
 def _update_path_memory(old_path: str, new_path: str, display_name: str | None = None) -> None:
     """Update one remembered path in place, retaining its aliases."""
-    from tools.applications import load_memory, remember_path
+    from hands.control.applications import load_memory, remember_path
 
     memory = load_memory()
     old_key = os.path.normcase(os.path.abspath(old_path))
@@ -694,7 +694,7 @@ def locate_executable(query: str) -> dict:
 
     Returns a dict describing what was found and its type.
     """
-    from tools.applications import (
+    from hands.control.applications import (
         load_memory, find_in_memory, normalize_name,
         forget_memory, mark_memory_verified, remember_application, validate_memory_record,
         BUILTIN_APPS, ALIASES,
@@ -940,7 +940,7 @@ def delete_file_or_folder(source_query: str) -> dict:
 
     # Remove from memory if it was tracked
     try:
-        from tools.applications import load_memory, forget_memory
+        from hands.control.applications import load_memory, forget_memory
         mem = load_memory()
         for k, v in mem.items():
             if os.path.normcase(os.path.abspath(v.get("target", ""))) == norm_source:

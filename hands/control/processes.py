@@ -81,7 +81,7 @@ def get_friendly_name(process_name: str, window_title: str) -> str:
 
     # 2. Check app_memory.json if available
     try:
-        from tools.applications import load_memory
+        from hands.control.applications import load_memory
         memory = load_memory()
         for k, v in memory.items():
             if clean_proc in k or clean_proc in v.get("name", "").lower():
@@ -270,7 +270,7 @@ def is_application_running(query: str) -> dict:
     # Resolve aliases and friendly name for query
     alias_target = clean_query
     try:
-        from tools.applications import ALIASES, load_memory
+        from hands.control.applications import ALIASES, load_memory
         alias_target = ALIASES.get(clean_query.lower(), clean_query)
     except Exception:
         pass
@@ -278,7 +278,7 @@ def is_application_running(query: str) -> dict:
     display_name = KNOWN_PROCESS_NAMES.get(clean_query.lower()) or KNOWN_PROCESS_NAMES.get(alias_target.lower())
     if not display_name:
         try:
-            from tools.applications import load_memory
+            from hands.control.applications import load_memory
             memory = load_memory()
             for k, v in memory.items():
                 if clean_query.lower() == k or alias_target.lower() == k or clean_query.lower() in [a.lower() for a in v.get("aliases", [])]:
