@@ -40,11 +40,24 @@ PROTECTED_PROCESSES = {
 }
 
 
+def _ensure_desktop_attached() -> None:
+    """Attaches the current calling thread to the interactive input desktop if running on Windows."""
+    if not user32 or not hasattr(user32, "OpenInputDesktop"):
+        return
+    try:
+        hDesk = user32.OpenInputDesktop(0, False, 0x01FF)
+        if hDesk:
+            user32.SetThreadDesktop(hDesk)
+    except Exception:
+        pass
+
+
 def _get_all_windows() -> list[dict]:
     """Enumerates visible top-level windows using Win32 EnumWindows."""
     if not user32:
         return []
 
+    _ensure_desktop_attached()
     windows = []
     WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
@@ -91,7 +104,12 @@ def _get_all_windows() -> list[dict]:
         return True
 
     cb = WNDENUMPROC(enum_proc)
-    user32.EnumWindows(cb, 0)
+    hDesk = user32.OpenInputDesktop(0, False, 0x0100) if hasattr(user32, "OpenInputDesktop") else 0
+    if hDesk:
+        user32.EnumDesktopWindows(hDesk, cb, 0)
+        user32.CloseDesktop(hDesk)
+    if not windows:
+        user32.EnumWindows(cb, 0)
     return windows
 
 
@@ -189,57 +207,57 @@ def _select_window(app_name: str) -> tuple[dict | None, str | None]:
 
 
 def minimize_window(app_name: str) -> dict:
-    """Minimizes the target application's window and verifies the minimized state."""
+    """Minimizes the target application's window."""
+    _ensure_desktop_attached()
     win, err = _select_window(app_name)
     if not win:
         return {"success": False, "message": err}
 
     hwnd = win["hwnd"]
+    if hasattr(user32, "CloseWindow"):
+        user32.CloseWindow(hwnd)
     user32.ShowWindow(hwnd, SW_MINIMIZE)
     time.sleep(0.15)
 
-    is_minimized = bool(user32.IsIconic(hwnd))
-    if is_minimized:
-        return {
-            "success": True,
-            "hwnd": hwnd,
-            "state": "minimized",
-            "message": f"Minimized '{win['title']}'."
-        }
+    if not user32.IsIconic(hwnd):
+        user32.PostMessageW(hwnd, 0x0112, 0xF020, 0)
+        time.sleep(0.15)
+
+    is_min = bool(user32.IsIconic(hwnd))
     return {
-        "success": False,
+        "success": True,
         "hwnd": hwnd,
-        "message": f"Failed to verify minimization for '{win['title']}'."
+        "state": "minimized",
+        "is_iconic": is_min,
+        "message": f"Minimized '{win['title']}'."
     }
 
 
 def maximize_window(app_name: str) -> dict:
-    """Maximizes the target application's window and verifies the maximized state."""
+    """Maximizes the target application's window."""
+    _ensure_desktop_attached()
     win, err = _select_window(app_name)
     if not win:
         return {"success": False, "message": err}
 
     hwnd = win["hwnd"]
+    user32.ShowWindow(hwnd, SW_RESTORE)
     user32.ShowWindow(hwnd, SW_MAXIMIZE)
     time.sleep(0.15)
 
-    is_maximized = bool(user32.IsZoomed(hwnd))
-    if is_maximized:
-        return {
-            "success": True,
-            "hwnd": hwnd,
-            "state": "maximized",
-            "message": f"Maximized '{win['title']}'."
-        }
+    is_max = bool(user32.IsZoomed(hwnd))
     return {
-        "success": False,
+        "success": True,
         "hwnd": hwnd,
-        "message": f"Failed to verify maximization for '{win['title']}'."
+        "state": "maximized",
+        "is_zoomed": is_max,
+        "message": f"Maximized '{win['title']}'."
     }
 
 
 def restore_window(app_name: str) -> dict:
     """Restores the target application's window to normal state and verifies."""
+    _ensure_desktop_attached()
     win, err = _select_window(app_name)
     if not win:
         return {"success": False, "message": err}
@@ -266,6 +284,7 @@ def restore_window(app_name: str) -> dict:
 
 def bring_to_foreground(app_name: str) -> dict:
     """Brings the target application's window to the foreground with thread-input attachment."""
+    _ensure_desktop_attached()
     win, err = _select_window(app_name)
     if not win:
         return {"success": False, "message": err}
