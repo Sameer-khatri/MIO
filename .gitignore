@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 agents/system_agent/app_memory.json
 core/app_memory.json
+core/action_history.json
 *.json.bak
 
 # Node & Frontend

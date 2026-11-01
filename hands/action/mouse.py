@@ -204,3 +204,7 @@ def mouse_scroll(amount: int = 120) -> dict:
         "amount": delta,
         "message": f"Scrolled mouse {direction} by {abs(delta)} units."
     }
+
+
+# Standard alias for tool callers & AI brain
+scroll = mouse_scroll

@@ -22,7 +22,13 @@ from hands.control.windows import (
     user32,
 )
 from hands.control.applications import open_application
-from hands.connectivity.browser import open_website, search_web, POPULAR_SITES
+from hands.connectivity.browser import (
+    open_website,
+    search_web,
+    POPULAR_SITES,
+    parse_multi_tab_query,
+    batch_search,
+)
 from hands.action.input import send_hotkey, type_text, show_desktop
 
 
@@ -119,7 +125,7 @@ def _execute_single_step(step: dict | str) -> dict:
         lower = cmd.lower()
 
         # Check for wait / pause: "wait 2s" or "pause 500ms"
-        wait_m = re.match(r"^(?:wait|pause|sleep)\s+([0-9.]+)\s*(s|sec|seconds|ms|millis)?$", lower)
+        wait_m = re.match(r"^(?:wait|pause|sleep)\s+([0-9.]+)\s*(s|sec|second|seconds|ms|milli|millis|milliseconds?)?$", lower)
         if wait_m:
             val = float(wait_m.group(1))
             unit = wait_m.group(2) or "s"
@@ -156,6 +162,17 @@ def _execute_single_step(step: dict | str) -> dict:
             res = bring_to_foreground(target)
             elapsed_ms = round((time.perf_counter() - step_start) * 1000, 1)
             return {"success": res.get("success", False), "action": "focus", "target": target, "elapsed_ms": elapsed_ms, "message": res.get("message")}
+
+        # Check for multi-tab browser request
+        multi_tab = parse_multi_tab_query(cmd)
+        if multi_tab:
+            engine = multi_tab.get("engine", "youtube")
+            queries = multi_tab.get("queries", [])
+            res = batch_search(queries, engine=engine)
+            wait_for_window_state(engine, expected_state="visible", timeout=2.0)
+            bring_to_foreground(engine)
+            elapsed_ms = round((time.perf_counter() - step_start) * 1000, 1)
+            return {"success": True, "action": "batch_search", "target": f"{len(queries)} tabs", "elapsed_ms": elapsed_ms, "message": res.get("message")}
 
         # Check for open website / youtube / app
         if lower.startswith("open "):
@@ -343,6 +360,10 @@ def parse_pipeline(query: str) -> list[str]:
 
     final_steps = []
     for p in parts:
+        if parse_multi_tab_query(p):
+            final_steps.append(p.strip())
+            continue
+
         subparts = [s.strip() for s in p.split(",") if s.strip()]
         if len(subparts) <= 1:
             if p.strip():
@@ -368,3 +389,57 @@ def run_pipeline(command_query: str, stop_on_failure: bool = False) -> dict:
     if not steps:
         return {"success": False, "message": "Could not parse any steps from command."}
     return execute_flow(steps, stop_on_failure=stop_on_failure)
+
+
+def set_work_mode() -> dict:
+    """
+    Enters focused work environment:
+    - Sets volume to 20%
+    - Switches Windows theme to Dark Mode
+    - Trims background memory footprint
+    """
+    from hands.sensory.audio import set_volume
+    from hands.connectivity.settings import set_windows_theme
+    from hands.connectivity.healer import trim_all_memory
+
+    vol_res = set_volume(20)
+    theme_res = set_windows_theme("dark")
+    mem_res = trim_all_memory()
+
+    return {
+        "success": True,
+        "mode": "work",
+        "volume": 20,
+        "theme": "dark",
+        "memory": mem_res.get("freed_mb", 0),
+        "message": "💼 Work Mode activated: Volume at 20%, Dark Theme active, and memory trimmed for peak performance."
+    }
+
+
+def set_chill_mode(play_music: bool = False) -> dict:
+    """
+    Enters relaxed chill environment:
+    - Sets volume to 40%
+    - Optionally opens lofi/ambient stream
+    """
+    from hands.sensory.audio import set_volume
+    set_volume(40)
+
+    if play_music:
+        from hands.connectivity.browser import open_youtube
+        open_youtube("lofi chill beats live")
+        return {
+            "success": True,
+            "mode": "chill",
+            "volume": 40,
+            "music": True,
+            "message": "☕ Chill Mode activated: Volume at 40% and playing Lo-Fi chill beats."
+        }
+
+    return {
+        "success": True,
+        "mode": "chill",
+        "volume": 40,
+        "music": False,
+        "message": "☕ Chill Mode activated: Master volume set to 40%."
+    }

@@ -125,7 +125,14 @@ def inspect_ui_elements(hwnd: int, query: str = "", control_type: str = "", max_
             if control_type:
                 cmd.extend(["-ControlType", control_type])
 
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=12)
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=12,
+            )
             if proc.returncode != 0:
                 return {"success": False, "error": proc.stderr.strip() or f"UIAutomation exited with {proc.returncode}"}
 

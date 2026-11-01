@@ -25,6 +25,14 @@ from .registry import (
     get_schemas,
 )
 
+from .history import (
+    record_action,
+    get_recent_actions,
+    get_last_action,
+    get_history_summary,
+    clear_history,
+)
+
 __all__ = [
     "handle_command",
     "run_agent",
@@ -38,4 +46,9 @@ __all__ = [
     "execute_tool",
     "execute_workflow",
     "get_schemas",
+    "record_action",
+    "get_recent_actions",
+    "get_last_action",
+    "get_history_summary",
+    "clear_history",
 ]

@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import time
 
 # Ensure UTF-8 console output for emojis on Windows
 if hasattr(sys.stdout, "reconfigure"):
@@ -39,6 +40,9 @@ from hands.storage.filesystem import (
     read_file_head,
     read_file_tail,
     get_folder_size,
+    organize_desktop,
+    organize_folder,
+    search_files,
 )
 from hands.control.windows import (
     list_windows,
@@ -55,6 +59,8 @@ from hands.control.flow import (
     run_pipeline,
     execute_flow,
     wait_for_window_state,
+    set_work_mode,
+    set_chill_mode,
 )
 from hands.connectivity.system_info import (
     get_system_info,
@@ -91,7 +97,11 @@ from hands.sensory.audio import (
     media_stop,
     speak_text,
     list_audio_devices,
+    get_current_media_info,
+    toggle_microphone_mute,
 )
+from hands.control.terminal import run_command as run_terminal_command
+from hands.connectivity.browser import fetch_webpage_text, search_web_summary
 from hands.action.clipboard import (
     get_clipboard_text,
     set_clipboard_text,
@@ -144,6 +154,9 @@ from hands.connectivity.browser import (
     parse_timestamp,
     open_website,
     POPULAR_SITES,
+    open_multiple_tabs,
+    batch_search,
+    parse_multi_tab_query,
 )
 
 try:
@@ -290,9 +303,94 @@ def extract_is_running_target(user_input: str) -> str | None:
     return None
 
 
-def handle_command(user_input: str) -> tuple[bool, str | None]:
+_ACTION_HISTORY: list[dict] = []
+
+
+def record_action(command: str, result_msg: str | None):
+    """Records executed action for conversational recall and brain introspection."""
+    if not command or not result_msg:
+        return
+    clean_msg = result_msg.strip()
+    if clean_msg.startswith("Unknown command:") or clean_msg.startswith("I don't know how to do"):
+        return
+    lower_c = command.lower().strip()
+    if any(k in lower_c for k in ("what did you", "what did u", "tell me what", "history", "recent actions", "last action")):
+        return
+
+    entry = {
+        "command": command.strip(),
+        "time": time.strftime("%H:%M:%S"),
+        "result": clean_msg
+    }
+    _ACTION_HISTORY.append(entry)
+    if len(_ACTION_HISTORY) > 50:
+        _ACTION_HISTORY.pop(0)
+
+    try:
+        from core.history import record_action as _hist_record
+        _hist_record("agent", "command", {"command": command.strip()}, {"message": clean_msg}, 0.0)
+    except Exception:
+        pass
+
+
+def get_last_action() -> dict:
+    """Returns details of the most recent action executed."""
+    if _ACTION_HISTORY:
+        last = _ACTION_HISTORY[-1]
+        return {
+            "success": True,
+            "action": last,
+            "message": f"Just now, I executed: '{last['command']}'. Result:\n{last['result']}"
+        }
+
+    try:
+        from core.history import get_last_action as _hist_get_last
+        hist = _hist_get_last()
+        if hist:
+            msg = hist.get("message") or f"{hist.get('tool')}.{hist.get('action')}"
+            return {
+                "success": True,
+                "action": hist,
+                "message": f"Just now, I executed: '{hist.get('action')}' on {hist.get('tool')}. Result:\n{msg}"
+            }
+    except Exception:
+        pass
+
+    return {"success": True, "action": None, "message": "I haven't performed any actions yet in this session."}
+
+
+def get_action_history(limit: int = 5) -> dict:
+    """Returns recent action history."""
+    if _ACTION_HISTORY:
+        recent = _ACTION_HISTORY[-limit:]
+        lines = [f"- [{h['time']}] '{h['command']}' -> {h['result']}" for h in reversed(recent)]
+        return {
+            "success": True,
+            "count": len(recent),
+            "history": recent,
+            "message": f"Recent Actions ({len(recent)}):\n" + "\n".join(lines)
+        }
+
+    try:
+        from core.history import get_recent_actions
+        recent_acts = get_recent_actions(limit)
+        if recent_acts:
+            lines = [f"- [{h.get('time')}] '{h.get('action')}' ({h.get('tool')}) -> {h.get('message')}" for h in recent_acts]
+            return {
+                "success": True,
+                "count": len(recent_acts),
+                "history": recent_acts,
+                "message": f"Recent Actions ({len(recent_acts)}):\n" + "\n".join(lines)
+            }
+    except Exception:
+        pass
+
+    return {"success": True, "count": 0, "history": [], "message": "I haven't performed any actions yet in this session."}
+
+
+def _execute_command(user_input: str) -> tuple[bool, str | None]:
     """
-    Parses and handles a single user input command.
+    Core command dispatcher for user input strings.
 
     Returns:
         tuple[bool, str | None]: (should_continue, message)
@@ -310,6 +408,19 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     if lower_input in ("exit", "quit"):
         return False, "Goodbye."
 
+    # 1.2 Action History & Conversational Introspection
+    if any(k in lower_input for k in (
+        "what did you just do", "what did u just do", "what did you do", "what did u do",
+        "tell me what you just did", "tell me what u just did", "what was the last thing you did",
+        "last action", "show last action", "what did u do now", "tell me what u just did now", "tell me what you did"
+    )):
+        res = get_last_action()
+        return True, res["message"]
+
+    if any(k in lower_input for k in ("action history", "show history", "recent actions", "what have you done")):
+        res = get_action_history()
+        return True, res["message"]
+
     # 1.5 Flow & Compound Multi-Step Workflow Pipeline
     if (
         lower_input.startswith("flow ")
@@ -323,11 +434,21 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         res = run_pipeline(q)
         return True, res.get("message")
 
+    # Multi-tab browser orchestration (checked before comma splitting)
+    multi_tab = parse_multi_tab_query(cleaned)
+    if multi_tab:
+        engine = multi_tab.get("engine", "youtube")
+        queries = multi_tab.get("queries", [])
+        res = batch_search(queries, engine=engine)
+        return True, res.get("message")
+
     # Fast multi-action comma pipeline: e.g. "minimize antigravity, open youtube search bbs, wait 2s, maximize antigravity"
     if "," in cleaned:
-        action_prefixes = ("open ", "minimize ", "min ", "maximize ", "max ", "restore ", "focus ", "bring ", "wait ", "pause ", "sleep ", "close ")
+        action_prefixes = ("open ", "minimize ", "min ", "maximize ", "max ", "restore ", "focus ", "bring ", "wait ", "pause ", "sleep ", "close ", "play ", "search ")
         subparts = [p.strip() for p in cleaned.split(",") if p.strip()]
-        if len(subparts) >= 2 and sum(1 for p in subparts if any(p.lower().startswith(pref) for pref in action_prefixes)) >= 2:
+        # Require majority of subparts to be action verbs to avoid splitting natural sentences
+        action_count = sum(1 for p in subparts if any(p.lower().startswith(pref) for pref in action_prefixes))
+        if len(subparts) >= 2 and action_count >= 2 and not parse_multi_tab_query(cleaned):
             res = run_pipeline(cleaned)
             return True, res.get("message")
 
@@ -424,18 +545,6 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
                 return True, f"👁️ ✋ Focused '{field_target}' and typed text successfully."
             return True, res.get("error", f"Could not find field '{field_target}' on screen.")
 
-    if lower_input.startswith("scroll "):
-        parts = lower_input.split()
-        direction = "down"
-        clicks = 3
-        if len(parts) >= 2 and parts[1] in ("up", "down"):
-            direction = parts[1]
-        if len(parts) >= 3 and parts[2].isdigit():
-            clicks = int(parts[2])
-        if eyes:
-            res = eyes.scroll(direction=direction, clicks=clicks)
-            return True, f"✋ {res.get('message')}"
-        return True, "MIO Eyes subsystem unavailable."
 
     drag_m = re.match(r"^drag\s+['\"]?(.+?)['\"]?\s+to\s+['\"]?(.+?)['\"]?$", cleaned, flags=re.I)
     if drag_m and eyes:
@@ -629,6 +738,14 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     if lower_input.startswith("open incognito") or lower_input.startswith("incognito"):
         target_url = re.sub(r"^(open incognito|incognito)\s*", "", cleaned, flags=re.I).strip()
         res = open_incognito(target_url)
+        return True, res.get("message")
+
+    # Multi-tab browser orchestration (e.g. "open 4 youtube tabs and search for techno gamer in first, bbs in second, triggered insan in 3rd and mr beast in 4th")
+    multi_tab = parse_multi_tab_query(cleaned)
+    if multi_tab:
+        engine = multi_tab.get("engine", "youtube")
+        queries = multi_tab.get("queries", [])
+        res = batch_search(queries, engine=engine)
         return True, res.get("message")
 
     # A. "search [for] <query> on/in/using (google|bing|duckduckgo|youtube|yahoo|web)"
@@ -1265,6 +1382,48 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
             return True, f"No files found in {loc_title}."
         return True, result.get("message", f"Failed to list files in {folder_query}.")
 
+    if lower_input in ("organize desktop", "clean desktop", "clean up desktop"):
+        res = organize_desktop()
+        return True, res.get("message")
+
+    if lower_input.startswith("organize folder ") or lower_input.startswith("organize "):
+        target = re.sub(r"^organize(\s+folder)?\s+", "", lower_input).strip()
+        res = organize_folder(target)
+        return True, res.get("message")
+
+    if lower_input.startswith("search files ") or lower_input.startswith("find files "):
+        pat = re.sub(r"^(search|find)\s+files\s+", "", lower_input).strip()
+        res = search_files(pat)
+        return True, res.get("message")
+
+    if lower_input in ("work mode", "focus mode", "enter work mode"):
+        res = set_work_mode()
+        return True, res.get("message")
+
+    if lower_input in ("chill mode", "relax mode", "enter chill mode"):
+        res = set_chill_mode()
+        return True, res.get("message")
+
+    if lower_input.startswith("terminal ") or lower_input.startswith("cmd ") or lower_input.startswith("exec ") or lower_input.startswith("powershell "):
+        cmd_str = re.sub(r"^(terminal|cmd|exec|powershell)\s+", "", cleaned, flags=re.I).strip()
+        res = run_terminal_command(cmd_str)
+        return True, res.get("message")
+
+    if lower_input in ("what song is playing", "current song", "now playing", "media info", "what is playing", "song info"):
+        res = get_current_media_info()
+        return True, res.get("message")
+
+    if lower_input in ("mute mic", "toggle mic", "unmute mic", "toggle microphone", "mute microphone"):
+        res = toggle_microphone_mute()
+        return True, res.get("message")
+
+    if lower_input.startswith("read webpage ") or lower_input.startswith("fetch webpage "):
+        w_url = re.sub(r"^(read|fetch)\s+webpage\s+", "", cleaned, flags=re.I).strip()
+        res = fetch_webpage_text(w_url)
+        if res.get("success"):
+            return True, f"📄 {res.get('title')}:\n{res.get('text')[:600]}..."
+        return True, res.get("message")
+
     if lower_input.startswith("create folder "):
         remainder = cleaned[14:].strip()
         match = re.search(r"^(.*?)\s+in\s+(.*)$", remainder, re.IGNORECASE)
@@ -1377,7 +1536,27 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     if lower_input == "open":
         return True, "Please specify an application to open. Example: 'open calculator'"
 
-    return True, f"Unknown command: '{cleaned}'. Type 'open <app>', 'set volume <x>', 'take screenshot', 'show clipboard', 'show desktop', 'show battery', etc."
+
+
+    return True, (
+        f"I don't know how to do '{cleaned}'.\n"
+        "Try: open <app>, search <query>, play <song> on youtube, set volume 50,\n"
+        "     take screenshot, show clipboard, show battery, trim ram, auto heal,\n"
+        "     organize desktop, work mode, chill mode, minimize <app>, close <app>"
+    )
+
+
+def handle_command(user_input: str) -> tuple[bool, str | None]:
+    """
+    Parses and handles a single user input command, automatically recording actions to memory.
+
+    Returns:
+        tuple[bool, str | None]: (should_continue, message)
+    """
+    should_continue, message = _execute_command(user_input)
+    if message and user_input:
+        record_action(user_input, message)
+    return should_continue, message
 
 
 def run_agent():
@@ -1394,6 +1573,7 @@ def run_agent():
 
         should_continue, message = handle_command(user_input)
         if message:
+            record_action(user_input, message)
             print(message)
             if not should_continue:
                 break

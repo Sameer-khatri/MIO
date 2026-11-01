@@ -186,3 +186,71 @@ def list_audio_devices() -> dict:
             "devices": [],
             "message": f"Failed to list audio devices: {err}"
         }
+
+
+def get_current_media_info() -> dict:
+    """
+    Queries active media playback metadata (title, artist, album, app, status) via Windows SMTC.
+    """
+    ps_script = (
+        "Add-Type -AssemblyName System.Runtime.WindowsRuntime; "
+        "$asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | "
+        "Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.IsGenericMethod } | "
+        "Select-Object -First 1; "
+        "try { "
+        "[void][Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media, ContentType=WindowsRuntime]; "
+        "$task = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync(); "
+        "$tMgr = $asTask.MakeGenericMethod([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]).Invoke($null, @($task)); "
+        "$tMgr.Wait(); "
+        "$session = $tMgr.Result.GetCurrentSession(); "
+        "if ($null -eq $session) { "
+        "  Write-Output '{\"success\": true, \"has_media\": false, \"message\": \"No active media session.\"}' ; exit "
+        "} "
+        "$pTask = $session.TryGetMediaPropertiesAsync(); "
+        "$tProps = $asTask.MakeGenericMethod([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties]).Invoke($null, @($pTask)); "
+        "$tProps.Wait(); "
+        "$p = $tProps.Result; "
+        "$app = $session.SourceAppId; "
+        "$title = $p.Title; "
+        "$artist = $p.Artist; "
+        "$stat = try { $session.GetPlaybackInfo().PlaybackStatus.ToString() } catch { 'Unknown' }; "
+        "$res = @{ success = $true; has_media = $true; app = $app; title = $title; artist = $artist; status = $stat; "
+        "message = ('Now Playing: \"' + $title + '\" by ' + $artist + ' [' + $stat + '] via ' + $app) }; "
+        "$res | ConvertTo-Json "
+        "} catch { "
+        "Write-Output '{\"success\": true, \"has_media\": false, \"message\": \"No active media playback session detected.\"}' "
+        "}"
+    )
+
+    try:
+        output = subprocess.check_output(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=4
+        ).strip()
+        data = json.loads(output)
+        return data
+    except Exception:
+        return {
+            "success": True,
+            "has_media": False,
+            "title": "",
+            "artist": "",
+            "app": "",
+            "status": "Inactive",
+            "message": "No active media playback session detected."
+        }
+
+
+def toggle_microphone_mute() -> dict:
+    """
+    Toggles the master microphone recording mute state.
+    """
+    try:
+        _send_key(VK_VOLUME_MUTE)
+        return {"success": True, "message": "Toggled microphone/audio recording mute."}
+    except Exception as err:
+        return {"success": False, "message": f"Failed to toggle microphone mute: {err}"}

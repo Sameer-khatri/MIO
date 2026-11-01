@@ -20,6 +20,7 @@ from eyes.ocr import recognize_image, capture_and_recognize_region
 from eyes.ui_tree import inspect_ui_elements
 from eyes.locator import locate_element, find_target_window, wait_for_element
 from eyes.reader import read_active_dialog, read_screen_region
+from eyes.watcher import get_screen_hash, wait_for_visual_change, wait_for_screen_stabilize
 
 from hands.action.mouse import move_cursor, click as mouse_click, drag_to as mouse_drag_to, mouse_scroll
 from hands.action.input import type_text
@@ -173,3 +174,13 @@ def scroll(direction: str = "down", clicks: int = 3) -> Dict[str, Any]:
 def get_status() -> Dict[str, Any]:
     """Returns the mechanical shutter and security status of MIO Eyes."""
     return get_guard_status()
+
+
+def wait_for_change(region: tuple[int, int, int, int] | None = None, timeout: float = 5.0) -> Dict[str, Any]:
+    """Waits until screen or region visually mutates."""
+    return wait_for_visual_change(region=region, timeout=timeout)
+
+
+def wait_for_idle(region: tuple[int, int, int, int] | None = None, timeout: float = 6.0) -> Dict[str, Any]:
+    """Waits until visual animations or rendering settle."""
+    return wait_for_screen_stabilize(region=region, timeout=timeout)

@@ -17,6 +17,15 @@ BROWSER_EXECUTABLES = {
     "firefox": "firefox.exe",
 }
 
+# Recency sort param: sorts YouTube results by upload date (newest first)
+_YT_SORT_UPLOAD_DATE = "&sp=CAI%253D"
+_RECENCY_WORDS = frozenset(("latest", "recent", "new", "newest", "today"))
+
+
+def _yt_sort_param(query: str) -> str:
+    """Returns YouTube upload-date sort param if recency keywords are in query."""
+    return _YT_SORT_UPLOAD_DATE if any(w in query.lower().split() for w in _RECENCY_WORDS) else ""
+
 
 def open_url(url: str) -> dict:
     """
@@ -83,6 +92,135 @@ def search_web(query: str, engine: str = "google") -> dict:
     return res
 
 
+def open_multiple_tabs(urls: list[str], delay_between: float = 0.2) -> dict:
+    """
+    Opens multiple URLs in separate tabs in the user's default browser.
+    """
+    if not urls:
+        return {"success": False, "count": 0, "message": "No URLs provided."}
+
+    opened = []
+    for i, u in enumerate(urls):
+        res = open_url(u)
+        if res.get("success"):
+            opened.append(u)
+        if i < len(urls) - 1 and delay_between > 0:
+            time.sleep(delay_between)
+
+    return {
+        "success": len(opened) == len(urls),
+        "total": len(urls),
+        "opened_count": len(opened),
+        "urls": opened,
+        "message": f"Opened {len(opened)}/{len(urls)} tabs in browser."
+    }
+
+
+def batch_search(queries: list[str], engine: str = "youtube", delay_between: float = 0.2) -> dict:
+    """
+    Opens a separate browser tab for each search query on the specified search engine.
+    """
+    if not queries:
+        return {"success": False, "count": 0, "message": "No queries provided."}
+
+    urls = []
+    engine_norm = engine.strip().lower()
+
+    for q in queries:
+        clean_q = q.strip()
+        # If the item looks like a URL or domain, open directly
+        if clean_q.startswith("http://") or clean_q.startswith("https://") or ("." in clean_q and "/" not in clean_q.split(".")[0]):
+            urls.append(clean_q)
+            continue
+
+        encoded = urllib.parse.quote_plus(clean_q)
+        if "youtube" in engine_norm or "yt" in engine_norm:
+            lower_q = clean_q.lower()
+            sort_param = "&sp=CAI%253D" if any(w in lower_q.split() for w in ("latest", "recent", "new", "newest")) else ""
+            urls.append(f"https://www.youtube.com/results?search_query={encoded}{sort_param}")
+        elif "bing" in engine_norm:
+            urls.append(f"https://www.bing.com/search?q={encoded}")
+        elif "duck" in engine_norm or "ddg" in engine_norm:
+            urls.append(f"https://duckduckgo.com/?q={encoded}")
+        elif "wiki" in engine_norm:
+            urls.append(f"https://en.wikipedia.org/wiki/Special:Search?search={encoded}")
+        else:
+            urls.append(f"https://www.google.com/search?q={encoded}")
+
+    res = open_multiple_tabs(urls, delay_between=delay_between)
+    res["engine"] = engine_norm
+    res["queries"] = queries
+    query_lines = "\n".join(f"  {i}. {q}" for i, q in enumerate(queries, 1))
+    res["message"] = f"Opened {len(res.get('urls', []))} {engine_norm.title()} tabs:\n{query_lines}"
+    return res
+
+
+def parse_multi_tab_query(user_input: str) -> dict | None:
+    """
+    Parses natural language requests to open multiple tabs.
+    Handles:
+      - 'open 4 youtube tabs and search for techno gamer in first, bbs in second, triggered insan in 3rd and mr beast in 4th'
+      - 'open 3 tabs for techno gamer, bbs, and mr beast on youtube'
+      - 'open 2 tabs: github.com, google.com'
+    """
+    cleaned = user_input.strip()
+    lower = cleaned.lower()
+    if not any(k in lower for k in ("tab", "tabs")):
+        return None
+
+    engine = "google"
+    if "youtube" in lower or "yt" in lower:
+        engine = "youtube"
+    elif "bing" in lower:
+        engine = "bing"
+    elif "duck" in lower or "ddg" in lower:
+        engine = "duckduckgo"
+    elif "wiki" in lower:
+        engine = "wikipedia"
+
+    ordinal_words = {
+        "1st": 1, "first": 1, "one": 1, "1": 1,
+        "2nd": 2, "second": 2, "two": 2, "2": 2,
+        "3rd": 3, "third": 3, "three": 3, "3": 3,
+        "4th": 4, "fourth": 4, "four": 4, "4": 4,
+        "5th": 5, "fifth": 5, "five": 5, "5": 5,
+        "6th": 6, "sixth": 6, "six": 6, "6": 6,
+        "7th": 7, "seventh": 7, "seven": 7, "7": 7,
+        "8th": 8, "eighth": 8, "eight": 8, "8": 8,
+    }
+
+    ord_pattern = re.compile(
+        r"(.+?)\s+(?:in|as|on)\s+(1st|first|one|1|2nd|second|two|2|3rd|third|three|3|4th|fourth|four|4|5th|fifth|five|5|6th|sixth|six|6|7th|seventh|seven|7|8th|eighth|eight|8)",
+        re.IGNORECASE
+    )
+    if ord_pattern.search(cleaned):
+        m = re.search(r"(?:search(?:\s+for)?|tabs(?:\s+for|\s*:)?)\s+(.+)$", cleaned, re.IGNORECASE)
+        payload = m.group(1).strip() if m else cleaned
+        norm_payload = re.sub(r",?\s+and\s+(?=[^,]+?\s+(?:in|as|on)\s+\w+)", ", ", payload, flags=re.I)
+        chunks = [c.strip() for c in norm_payload.split(",") if c.strip()]
+        parsed = {}
+        for c in chunks:
+            match = ord_pattern.search(c)
+            if match:
+                q_text = match.group(1).strip()
+                q_text = re.sub(r"^(?:and\s+)?(?:search(?:\s+for)?|open|for)\s+", "", q_text, flags=re.I).strip()
+                idx = ordinal_words.get(match.group(2).lower(), 99)
+                parsed[idx] = q_text
+        if parsed:
+            return {"engine": engine, "queries": [parsed[k] for k in sorted(parsed.keys())]}
+
+    # List check: 'tabs for A, B, C' or 'tabs: A, B, C'
+    list_m = re.search(r"(?:tabs\s+(?:for|with|of|search|and\s+search(?:\s+for)?)|tabs\s*:)\s+(.+)$", cleaned, re.IGNORECASE)
+    if list_m:
+        raw_list = list_m.group(1).strip()
+        raw_list = re.sub(r"\s+on\s+(?:youtube|google|bing|browser)$", "", raw_list, flags=re.I).strip()
+        items = [i.strip() for i in re.split(r",|\s+and\s+", raw_list) if i.strip()]
+        if len(items) >= 2:
+            return {"engine": engine, "queries": items}
+
+    return None
+
+
 POPULAR_SITES = {
     "google": "https://www.google.com",
     "youtube": "https://www.youtube.com",
@@ -104,6 +242,12 @@ POPULAR_SITES = {
     "bing": "https://www.bing.com",
     "yahoo": "https://www.yahoo.com",
     "claude": "https://claude.ai",
+    "perplexity": "https://www.perplexity.ai",
+    "gemini": "https://gemini.google.com",
+    "spotify": "https://open.spotify.com",
+    "twitch": "https://www.twitch.tv",
+    "discord": "https://discord.com/app",
+    "notion": "https://www.notion.so",
 }
 
 
@@ -394,11 +538,40 @@ def open_youtube(query: str = "", video_url: str = "", timestamp: str | int = 0)
 
 def get_top_youtube_video_id(query: str) -> str | None:
     """
-    Resolves the top YouTube video ID for a search query without requiring any API keys.
-    Returns the 11-character video ID (e.g. 'W0DM5lcj6mw') or None if unreachable.
+    Resolves the top YouTube video ID for a search query without any API keys.
+    Applies upload-date sort when recency keywords are detected so the
+    newest video is always the first result returned.
     """
     if not query or not isinstance(query, str):
         return None
+    try:
+        clean_q = query.strip()
+        encoded = __import__("urllib.parse", fromlist=["quote_plus"]).quote_plus(clean_q)
+        sort_param = _yt_sort_param(clean_q)
+        search_url = f"https://www.youtube.com/results?search_query={encoded}{sort_param}"
+        import urllib.request
+        req = urllib.request.Request(
+            search_url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+
+        seen: set[str] = set()
+        for vid in __import__("re").findall(r"/watch\?v=([a-zA-Z0-9_-]{11})", html):
+            if len(vid) == 11 and vid not in seen:
+                seen.add(vid)
+                return vid
+    except Exception:
+        pass
+    return None
     try:
         clean_q = query.strip()
         lower_q = clean_q.lower()
@@ -591,4 +764,166 @@ def open_youtube_and_type(query: str, timestamp: str | int = 0, physical_typing:
             pass
 
     return search_and_play_youtube(clean_q, timestamp=secs)
+
+
+def fetch_webpage_text(url: str, max_chars: int = 5000) -> dict:
+    """
+    Fetches a webpage via HTTP request without opening a browser window.
+    Extracts page title, headings, and clean readable body text.
+    Zero external dependencies (uses standard library urllib & html.parser).
+    """
+    import html
+    import re
+    import urllib.request
+    from html.parser import HTMLParser
+
+    if not url or not isinstance(url, str):
+        return {"success": False, "message": "Valid URL is required."}
+
+    target_url = url.strip()
+    if not (target_url.startswith("http://") or target_url.startswith("https://")):
+        target_url = "https://" + target_url
+
+    class CleanTextExtractor(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.title = ""
+            self.in_title = False
+            self.in_script = False
+            self.text_parts = []
+            self.links = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag.lower() == "title":
+                self.in_title = True
+            elif tag.lower() in ("script", "style", "noscript"):
+                self.in_script = True
+            elif tag.lower() == "a":
+                href = dict(attrs).get("href")
+                if href and href.startswith("http"):
+                    self.links.append(href)
+
+        def handle_endtag(self, tag):
+            if tag.lower() == "title":
+                self.in_title = False
+            elif tag.lower() in ("script", "style", "noscript"):
+                self.in_script = False
+            elif tag.lower() in ("p", "div", "br", "h1", "h2", "h3", "h4", "li"):
+                self.text_parts.append("\n")
+
+        def handle_data(self, data):
+            if self.in_title:
+                self.title += data
+            elif not self.in_script:
+                cleaned = data.strip()
+                if cleaned:
+                    self.text_parts.append(cleaned + " ")
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    try:
+        req = urllib.request.Request(target_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            content_type = resp.headers.get_content_type()
+            if "text/html" not in content_type and "text/plain" not in content_type:
+                return {
+                    "success": False,
+                    "url": target_url,
+                    "content_type": content_type,
+                    "message": f"Unsupported content type: {content_type} (expected HTML or text)."
+                }
+            raw_html = resp.read().decode("utf-8", errors="replace")
+
+        parser = CleanTextExtractor()
+        parser.feed(raw_html)
+
+        raw_text = "".join(parser.text_parts)
+        # Normalize whitespace
+        cleaned_text = re.sub(r"\n{3,}", "\n\n", raw_text).strip()
+        trimmed_text = cleaned_text[:max_chars]
+
+        title = html.unescape(parser.title).strip() or target_url
+        return {
+            "success": True,
+            "url": target_url,
+            "title": title,
+            "text": trimmed_text,
+            "char_count": len(trimmed_text),
+            "links_sample": parser.links[:10],
+            "message": f"Fetched '{title}' ({len(trimmed_text)} characters)."
+        }
+    except Exception as err:
+        return {"success": False, "url": target_url, "message": f"Failed to fetch webpage: {err}"}
+
+
+def search_web_summary(query: str, max_results: int = 5) -> dict:
+    """
+    Performs an instant web search and returns structured search results (titles, links, snippets)
+    without opening browser windows, ideal for AI Brain factual grounding.
+    """
+    import html
+    import json
+    import re
+    import urllib.parse
+    import urllib.request
+
+    if not query or not isinstance(query, str):
+        return {"success": False, "results": [], "message": "Search query is required."}
+
+    clean_q = query.strip()
+    encoded = urllib.parse.quote_plus(clean_q)
+    # DuckDuckGo Lite / HTML API
+    api_url = f"https://api.duckduckgo.com/?q={encoded}&format=json&no_html=1&skip_disambig=1"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    try:
+        req = urllib.request.Request(api_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+
+        results = []
+        # Check abstract
+        if data.get("AbstractText"):
+            results.append({
+                "title": data.get("Heading", clean_q),
+                "url": data.get("AbstractURL", ""),
+                "snippet": data.get("AbstractText", ""),
+            })
+
+        # Check related topics
+        for item in data.get("RelatedTopics", []):
+            if isinstance(item, dict) and "Text" in item and "FirstURL" in item:
+                results.append({
+                    "title": item.get("Text", "").split(" - ")[0],
+                    "url": item.get("FirstURL", ""),
+                    "snippet": item.get("Text", ""),
+                })
+            if len(results) >= max_results:
+                break
+
+        if results:
+            return {
+                "success": True,
+                "query": clean_q,
+                "count": len(results),
+                "results": results,
+                "message": f"Found {len(results)} search result(s) for '{clean_q}'."
+            }
+
+        # Fallback to direct web link
+        web_link = f"https://duckduckgo.com/?q={encoded}"
+        return {
+            "success": True,
+            "query": clean_q,
+            "count": 1,
+            "results": [{"title": clean_q, "url": web_link, "snippet": f"Web search for {clean_q}"}],
+            "message": f"Web search link ready for '{clean_q}'."
+        }
+    except Exception as err:
+        return {"success": False, "query": clean_q, "results": [], "message": f"Web search error: {err}"}
 

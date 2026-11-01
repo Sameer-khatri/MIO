@@ -162,3 +162,8 @@ def set_transparency_effects(enabled: bool) -> dict:
         }
     except Exception as err:
         return {"success": False, "message": f"Failed to update transparency: {err}"}
+
+
+# Aliases for registry catalog and callers
+get_windows_theme = get_theme_mode
+set_windows_theme = set_theme_mode

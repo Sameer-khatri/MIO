@@ -1,7 +1,7 @@
 """
 MIO System Agent - Master Tool Inventory & Hand Kit Registry
 
-This module acts as the central catalog and execution gateway for all 25 standalone tools.
+This module acts as the central catalog and execution gateway for all 29 standalone tools.
 It organizes MIO's capabilities into 5 modular Hand Kits and provides direct,
 command-free dynamic execution for any reasoning engine or AI brain.
 """
@@ -35,7 +35,7 @@ HAND_KITS = {
     "control": {
         "name": "Control Hand (Applications & Windows)",
         "description": "Controls active desktop windows, software execution, process lifecycles, and installed apps.",
-        "tools": ["applications", "windows", "processes", "installed_apps", "flow"],
+        "tools": ["applications", "windows", "processes", "installed_apps", "flow", "terminal"],
     },
     "storage": {
         "name": "Storage Hand (Filesystem, Drives & Archives)",
@@ -68,8 +68,8 @@ TOOL_CATALOG = {
     },
     "audio": {
         "kit": "sensory",
-        "description": "Master volume control, media playback keys, SAPI text-to-speech, and audio device listing.",
-        "primary_actions": ["set_volume", "volume_up", "volume_down", "toggle_mute", "speak_text", "list_audio_devices", "media_play_pause", "media_next", "media_prev", "media_stop"],
+        "description": "Master volume control, media playback keys, SAPI text-to-speech, audio device listing, active song metadata, and mic mute.",
+        "primary_actions": ["set_volume", "volume_up", "volume_down", "toggle_mute", "speak_text", "list_audio_devices", "media_play_pause", "media_next", "media_prev", "media_stop", "get_current_media_info", "toggle_microphone_mute"],
     },
     "brightness": {
         "kit": "sensory",
@@ -123,14 +123,19 @@ TOOL_CATALOG = {
     "flow": {
         "kit": "control",
         "description": "High-speed compound task workflow orchestrator, pipelined action chaining, and adaptive window sync.",
-        "primary_actions": ["run_pipeline", "execute_flow", "wait_for_window_state"],
+        "primary_actions": ["run_pipeline", "execute_flow", "wait_for_window_state", "set_work_mode", "set_chill_mode"],
+    },
+    "terminal": {
+        "kit": "control",
+        "description": "Shell command execution (PowerShell/cmd) with timeout guards, stdout/stderr capture, and environment variables.",
+        "primary_actions": ["run_command", "run_powershell_script", "get_environment_variable", "set_environment_variable"],
     },
 
     # Storage Hand
     "filesystem": {
         "kit": "storage",
-        "description": "List files, create folders, safe move, copy, rename, delete to Recycle Bin, head/tail, and folder size.",
-        "primary_actions": ["list_files", "find_file_or_folder", "create_folder", "copy_file_or_folder", "move_file_or_folder", "rename_file_or_folder", "delete_file_or_folder", "read_file_head", "read_file_tail", "get_folder_size"],
+        "description": "List files, create folders, safe move, copy, rename, delete to Recycle Bin, head/tail, folder size, desktop cleanup/organize, and file search.",
+        "primary_actions": ["list_files", "find_file_or_folder", "create_folder", "copy_file_or_folder", "move_file_or_folder", "rename_file_or_folder", "delete_file_or_folder", "read_file_head", "read_file_tail", "get_folder_size", "organize_desktop", "organize_folder", "search_files"],
     },
     "archive": {
         "kit": "storage",
@@ -166,8 +171,8 @@ TOOL_CATALOG = {
     },
     "browser": {
         "kit": "connectivity",
-        "description": "Open default browser, launch incognito/private windows, route to specific browser, and batch tabs.",
-        "primary_actions": ["open_url", "search_web", "open_website", "open_incognito", "open_with_browser", "open_multiple_urls", "get_default_browser", "open_youtube", "search_and_play_youtube", "control_youtube", "open_youtube_and_type"],
+        "description": "Open default browser, launch incognito/private windows, route to specific browser, batch tabs, headless webpage reading, and instant search summaries.",
+        "primary_actions": ["open_url", "search_web", "open_website", "open_incognito", "open_with_browser", "open_multiple_urls", "get_default_browser", "open_youtube", "search_and_play_youtube", "control_youtube", "open_youtube_and_type", "fetch_webpage_text", "search_web_summary"],
     },
     "power": {
         "kit": "connectivity",
@@ -260,10 +265,18 @@ def list_all_tools() -> dict:
 
 
 def get_tool_module(tool_name: str):
-    """Dynamically loads and returns a tool module from hands/ or eyes/."""
+    """Dynamically loads and returns a tool module from hands/, eyes/, people/, or core/."""
     clean_name = tool_name.strip().lower()
     if clean_name in ("eyes", "eye"):
         return importlib.import_module("eyes")
+    if clean_name in ("mouth", "voice", "speech"):
+        return importlib.import_module("mouth")
+    if clean_name in ("ears", "ear", "listen", "hearing"):
+        return importlib.import_module("ears")
+    if clean_name in ("aegis", "doctor_aegis"):
+        return importlib.import_module("people.aegis.aegis")
+    if clean_name in ("history", "action_history", "memory"):
+        return importlib.import_module("core.history")
     if clean_name not in TOOL_CATALOG:
         raise ValueError(f"Tool '{clean_name}' is not in the MIO inventory.")
 
@@ -317,21 +330,31 @@ def execute_action(tool_name: str, action_name: str, **kwargs) -> dict:
             "message": f"Action '{action_name}' does not exist on tool '{clean_tool}'."
         }
 
+    import time
+    t0 = time.perf_counter()
     try:
-        result = func(**kwargs)
-        if isinstance(result, dict):
-            return result
-        return {"success": True, "result": result}
+        raw_result = func(**kwargs)
+        res = raw_result if isinstance(raw_result, dict) else {"success": True, "result": raw_result}
     except TypeError as err:
-        return {
+        res = {
             "success": False,
             "message": f"Parameter mismatch calling '{clean_tool}.{clean_action}': {err}"
         }
     except Exception as err:
-        return {
+        res = {
             "success": False,
             "message": f"Error executing '{clean_tool}.{clean_action}': {err}"
         }
+
+    duration_ms = round((time.perf_counter() - t0) * 1000, 1)
+
+    try:
+        from core.history import record_action
+        record_action(clean_tool, clean_action, kwargs, res, duration_ms)
+    except Exception:
+        pass
+
+    return res
 
 
 # Convenient alias

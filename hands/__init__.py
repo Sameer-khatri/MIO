@@ -26,7 +26,7 @@ from hands.sensory import screen, display, audio, brightness, notifications
 from hands.action import mouse, input, clipboard
 
 # Control Hand
-from hands.control import applications, windows, processes, installed_apps
+from hands.control import applications, windows, processes, installed_apps, flow, terminal
 
 # Storage Hand
 from hands.storage import filesystem, archive, drives, hasher
@@ -51,7 +51,7 @@ __all__ = [
     # Action
     "mouse", "input", "clipboard",
     # Control
-    "applications", "windows", "processes", "installed_apps",
+    "applications", "windows", "processes", "installed_apps", "flow", "terminal",
     # Storage
     "filesystem", "archive", "drives", "hasher",
     # Connectivity

@@ -1061,6 +1061,163 @@ def get_folder_size(folder_path: str) -> dict:
     except Exception as err:
         return {"success": False, "message": f"Failed to compute folder size: {err}"}
 
+DEFAULT_FILE_CATEGORIES = {
+    "Images": [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".psd"],
+    "Documents": [".pdf", ".docx", ".doc", ".txt", ".pptx", ".ppt", ".xlsx", ".xls", ".csv", ".md", ".epub", ".rtf"],
+    "Audio": [".mp3", ".wav", ".flac", ".aac", ".m4a", ".ogg", ".wma"],
+    "Videos": [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v"],
+    "Archives": [".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz"],
+    "Code": [".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".css", ".json", ".java", ".c", ".cpp", ".cs", ".go", ".rs", ".sh", ".bat", ".ps1", ".sql"],
+    "Installers": [".exe", ".msi", ".iso", ".dmg"],
+}
 
 
+def organize_folder(
+    folder_path: str = "desktop",
+    keep_shortcuts: bool = True,
+    custom_categories: dict | None = None,
+) -> dict:
+    """
+    Cleans up and organizes loose files in a folder into categorized subdirectories.
+    Categories: Images, Documents, Audio, Videos, Archives, Code, Installers.
+    Leaves shortcuts (.lnk, .url) and existing folders untouched by default.
+    """
+    target_dir = resolve_location(folder_path) or os.path.abspath(folder_path)
+    if not os.path.exists(target_dir) or not os.path.isdir(target_dir):
+        return {"success": False, "message": f"Target folder not found: '{folder_path}'."}
+
+    cats = custom_categories or DEFAULT_FILE_CATEGORIES
+    ext_to_cat = {}
+    for cat_name, extensions in cats.items():
+        for ext in extensions:
+            ext_to_cat[ext.lower()] = cat_name
+
+    category_folder_names = set(cats.keys())
+    moved_files = []
+    category_counts = {}
+
+    try:
+        entries = list(os.scandir(target_dir))
+    except Exception as err:
+        return {"success": False, "message": f"Cannot read directory '{target_dir}': {err}"}
+
+    for entry in entries:
+        if not entry.is_file():
+            continue
+
+        filename = entry.name
+        if filename.startswith(".") or filename.startswith("~$"):
+            continue
+
+        _, ext = os.path.splitext(filename)
+        ext_lower = ext.lower()
+
+        if keep_shortcuts and ext_lower in (".lnk", ".url"):
+            continue
+
+        cat = ext_to_cat.get(ext_lower)
+        if not cat:
+            continue
+
+        dest_folder = os.path.join(target_dir, cat)
+        os.makedirs(dest_folder, exist_ok=True)
+
+        dest_path = os.path.join(dest_folder, filename)
+        # Collision handling
+        if os.path.exists(dest_path):
+            base_name, file_ext = os.path.splitext(filename)
+            counter = 1
+            while os.path.exists(dest_path):
+                dest_path = os.path.join(dest_folder, f"{base_name} ({counter}){file_ext}")
+                counter += 1
+
+        try:
+            shutil.move(entry.path, dest_path)
+            moved_files.append({"from": entry.path, "to": dest_path, "category": cat})
+            category_counts[cat] = category_counts.get(cat, 0) + 1
+        except Exception:
+            continue
+
+    total_moved = len(moved_files)
+    folder_display = os.path.basename(target_dir) or target_dir
+    if total_moved == 0:
+        return {
+            "success": True,
+            "folder": target_dir,
+            "moved_count": 0,
+            "categories": {},
+            "moved_files": [],
+            "message": f"Folder '{folder_display}' is already clean; no loose files matched categorization."
+        }
+
+    cat_breakdown = ", ".join(f"{c}: {n}" for c, n in sorted(category_counts.items()))
+    return {
+        "success": True,
+        "folder": target_dir,
+        "moved_count": total_moved,
+        "categories": category_counts,
+        "moved_files": moved_files,
+        "message": f"Organized {folder_display}: Moved {total_moved} loose files into categorized folders ({cat_breakdown})."
+    }
+
+
+def organize_desktop() -> dict:
+    """Convenience alias to organize the Windows Desktop."""
+    return organize_folder("desktop")
+
+
+def search_files(
+    pattern: str,
+    root_dir: str = "desktop",
+    max_results: int = 50,
+) -> dict:
+    """
+    Fast search for files matching a keyword, filename, or wildcard pattern (e.g. '*.pdf', 'budget*').
+    Searches recursively from root_dir (default: 'desktop', supports friendly locations like 'downloads', 'documents').
+    """
+    import fnmatch
+
+    if not pattern or not isinstance(pattern, str):
+        return {"success": False, "matches": [], "message": "Search pattern is required."}
+
+    clean_pattern = pattern.strip()
+    norm_root = resolve_location(root_dir) or os.path.abspath(root_dir)
+    if not os.path.exists(norm_root) or not os.path.isdir(norm_root):
+        return {"success": False, "matches": [], "message": f"Root directory '{root_dir}' not found."}
+
+    # Add wildcards if plain keyword
+    glob_pattern = clean_pattern if any(ch in clean_pattern for ch in ("*", "?", "[")) else f"*{clean_pattern}*"
+
+    matches = []
+    try:
+        for root, dirs, files in os.walk(norm_root):
+            # Prune hidden or system directories
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("$RECYCLE.BIN", "System Volume Information", "node_modules")]
+            for f in files:
+                if fnmatch.fnmatch(f.lower(), glob_pattern.lower()):
+                    full_p = os.path.join(root, f)
+                    try:
+                        sz = os.path.getsize(full_p)
+                    except OSError:
+                        sz = 0
+                    matches.append({
+                        "name": f,
+                        "path": full_p,
+                        "size_bytes": sz,
+                    })
+                    if len(matches) >= max_results:
+                        break
+            if len(matches) >= max_results:
+                break
+
+        return {
+            "success": True,
+            "pattern": clean_pattern,
+            "root_dir": norm_root,
+            "count": len(matches),
+            "matches": matches,
+            "message": f"Found {len(matches)} matching file(s) for '{clean_pattern}' in {os.path.basename(norm_root) or norm_root}."
+        }
+    except Exception as err:
+        return {"success": False, "pattern": clean_pattern, "matches": [], "message": f"Search error: {err}"}
 

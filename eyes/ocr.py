@@ -110,6 +110,8 @@ def recognize_image(image_path: str) -> dict:
             ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", _OCR_POWERSHELL_SCRIPT, "-ImagePath", os.path.abspath(image_path)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=15,
         )
         if proc.returncode != 0:
