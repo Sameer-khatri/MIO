@@ -51,6 +51,11 @@ from hands.control.windows import (
     snap_window,
     set_always_on_top,
 )
+from hands.control.flow import (
+    run_pipeline,
+    execute_flow,
+    wait_for_window_state,
+)
 from hands.connectivity.system_info import (
     get_system_info,
     get_cpu_usage,
@@ -304,6 +309,27 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     # 1. Exit / Quit handling
     if lower_input in ("exit", "quit"):
         return False, "Goodbye."
+
+    # 1.5 Flow & Compound Multi-Step Workflow Pipeline
+    if (
+        lower_input.startswith("flow ")
+        or lower_input.startswith("run flow")
+        or lower_input.startswith("pipeline ")
+        or " then " in lower_input
+        or " and then " in lower_input
+        or " -> " in lower_input
+    ):
+        q = re.sub(r"^(?:run\s+flow(?::)?|flow(?::)?|pipeline(?::)?)\s*", "", cleaned, flags=re.I).strip()
+        res = run_pipeline(q)
+        return True, res.get("message")
+
+    # Fast multi-action comma pipeline: e.g. "minimize antigravity, open youtube search bbs, wait 2s, maximize antigravity"
+    if "," in cleaned:
+        action_prefixes = ("open ", "minimize ", "min ", "maximize ", "max ", "restore ", "focus ", "bring ", "wait ", "pause ", "sleep ", "close ")
+        subparts = [p.strip() for p in cleaned.split(",") if p.strip()]
+        if len(subparts) >= 2 and sum(1 for p in subparts if any(p.lower().startswith(pref) for pref in action_prefixes)) >= 2:
+            res = run_pipeline(cleaned)
+            return True, res.get("message")
 
     # 2. "where is <tool>?" / "where <tool>" handling
     where_target = extract_where_target(user_input)

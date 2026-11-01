@@ -187,11 +187,36 @@ def list_windows(app_name: str | None = None) -> dict:
         }
 
 
+_HWND_CACHE: dict[str, int] = {}
+
+
 def _select_window(app_name: str) -> tuple[dict | None, str | None]:
-    """Finds best matching window for target app, preferring foreground window."""
+    """Finds best matching window for target app, preferring foreground window with fast cache."""
     clean_app = app_name.strip()
     if not clean_app:
         return None, "Please specify an application name."
+
+    norm_query = clean_app.lower()
+    # Fast path: check cached HWND
+    if norm_query in _HWND_CACHE and user32:
+        cached_hwnd = _HWND_CACHE[norm_query]
+        if user32.IsWindow(cached_hwnd) and user32.IsWindowVisible(cached_hwnd):
+            length = user32.GetWindowTextLengthW(cached_hwnd)
+            if length > 0:
+                buff = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(cached_hwnd, buff, length + 1)
+                title = buff.value.strip()
+                if norm_query in title.lower() or any(norm_query in part.lower() for part in title.split()):
+                    is_iconic = bool(user32.IsIconic(cached_hwnd))
+                    is_zoomed = bool(user32.IsZoomed(cached_hwnd))
+                    state = "minimized" if is_iconic else ("maximized" if is_zoomed else "normal")
+                    return {
+                        "hwnd": cached_hwnd,
+                        "title": title,
+                        "pid": 0,
+                        "child_pids": [],
+                        "state": state
+                    }, None
 
     all_wins = _get_all_windows()
     matched = _match_windows_for_query(clean_app, all_wins)
@@ -199,11 +224,14 @@ def _select_window(app_name: str) -> tuple[dict | None, str | None]:
         return None, f"I couldn't find any visible window for '{clean_app}'."
 
     fg_hwnd = user32.GetForegroundWindow() if user32 else 0
+    selected = matched[0]
     for w in matched:
         if w["hwnd"] == fg_hwnd:
-            return w, None
+            selected = w
+            break
 
-    return matched[0], None
+    _HWND_CACHE[norm_query] = selected["hwnd"]
+    return selected, None
 
 
 def minimize_window(app_name: str) -> dict:
@@ -217,11 +245,11 @@ def minimize_window(app_name: str) -> dict:
     if hasattr(user32, "CloseWindow"):
         user32.CloseWindow(hwnd)
     user32.ShowWindow(hwnd, SW_MINIMIZE)
-    time.sleep(0.15)
+    time.sleep(0.05)
 
     if not user32.IsIconic(hwnd):
         user32.PostMessageW(hwnd, 0x0112, 0xF020, 0)
-        time.sleep(0.15)
+        time.sleep(0.05)
 
     is_min = bool(user32.IsIconic(hwnd))
     return {
@@ -243,7 +271,7 @@ def maximize_window(app_name: str) -> dict:
     hwnd = win["hwnd"]
     user32.ShowWindow(hwnd, SW_RESTORE)
     user32.ShowWindow(hwnd, SW_MAXIMIZE)
-    time.sleep(0.15)
+    time.sleep(0.05)
 
     is_max = bool(user32.IsZoomed(hwnd))
     return {

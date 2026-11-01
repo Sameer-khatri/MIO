@@ -35,7 +35,7 @@ HAND_KITS = {
     "control": {
         "name": "Control Hand (Applications & Windows)",
         "description": "Controls active desktop windows, software execution, process lifecycles, and installed apps.",
-        "tools": ["applications", "windows", "processes", "installed_apps"],
+        "tools": ["applications", "windows", "processes", "installed_apps", "flow"],
     },
     "storage": {
         "name": "Storage Hand (Filesystem, Drives & Archives)",
@@ -119,6 +119,11 @@ TOOL_CATALOG = {
         "kit": "control",
         "description": "Registry-based installed desktop software scanner, version lookup, and uninstall commands.",
         "primary_actions": ["list_installed_software", "get_app_version", "get_app_uninstall_command"],
+    },
+    "flow": {
+        "kit": "control",
+        "description": "High-speed compound task workflow orchestrator, pipelined action chaining, and adaptive window sync.",
+        "primary_actions": ["run_pipeline", "execute_flow", "wait_for_window_state"],
     },
 
     # Storage Hand
