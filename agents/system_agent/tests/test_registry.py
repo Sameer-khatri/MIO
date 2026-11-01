@@ -78,6 +78,17 @@ class TestRegistry(unittest.TestCase):
         self.assertTrue(len(sensory_schemas) > 0)
         self.assertTrue(len(sensory_schemas) < len(all_schemas))
 
+    def test_execute_workflow(self):
+        from registry import execute_workflow
+        wf_steps = [
+            {"tool": "hasher", "action": "hash_text", "args": {"text": "Step 1", "algorithm": "sha256"}},
+            {"tool": "hasher", "action": "hash_text", "args": {"text": "Step 2", "algorithm": "md5"}},
+        ]
+        wf_res = execute_workflow(wf_steps)
+        self.assertTrue(wf_res["success"])
+        self.assertEqual(wf_res["executed_steps"], 2)
+        self.assertEqual(len(wf_res["results"]), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

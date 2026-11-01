@@ -2698,6 +2698,105 @@ class TestSystemAgent(unittest.TestCase):
             self.assertTrue(cont)
             self.assertEqual(msg, "Cleared 120 MB temp files")
 
+    def test_youtube_tools(self):
+        from tools.browser import (
+            parse_timestamp,
+            open_youtube,
+            search_and_play_youtube,
+            control_youtube,
+            open_youtube_and_type,
+        )
+        from tools.input import press_key
+
+        # Timestamp parsing tests
+        self.assertEqual(parse_timestamp("2 minute"), 120)
+        self.assertEqual(parse_timestamp("2 minutes"), 120)
+        self.assertEqual(parse_timestamp("2m"), 120)
+        self.assertEqual(parse_timestamp("2:00"), 120)
+        self.assertEqual(parse_timestamp("01:30"), 90)
+        self.assertEqual(parse_timestamp("1 hour 30 min"), 5400)
+        self.assertEqual(parse_timestamp("45s"), 45)
+        self.assertEqual(parse_timestamp(120), 120)
+
+        # open_youtube
+        with patch("tools.browser.webbrowser.open") as mock_open:
+            res_hp = open_youtube()
+            self.assertTrue(res_hp["success"])
+            self.assertEqual(res_hp["mode"], "homepage")
+            mock_open.assert_called_with("https://www.youtube.com", new=2)
+
+            res_search = open_youtube(query="lofi", timestamp="2 minute")
+            self.assertTrue(res_search["success"])
+            self.assertEqual(res_search["mode"], "search")
+            self.assertEqual(res_search["timestamp_seconds"], 120)
+            self.assertIn("search_query=lofi", res_search["url"])
+
+            res_vid = open_youtube(video_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", timestamp="2 minute")
+            self.assertTrue(res_vid["success"])
+            self.assertEqual(res_vid["mode"], "video_url")
+            self.assertIn("&t=120s", res_vid["url"])
+
+        # search_and_play_youtube
+        with patch("tools.browser.webbrowser.open"):
+            res_sp = search_and_play_youtube("interstellar theme", timestamp="1:45")
+            self.assertTrue(res_sp["success"])
+            self.assertEqual(res_sp["timestamp_seconds"], 105)
+
+        # control_youtube
+        with patch("tools.input.send_hotkey", return_value={"success": True}):
+            res_ctrl = control_youtube("play")
+            self.assertTrue(res_ctrl["success"])
+            self.assertEqual(res_ctrl["key"], "k")
+
+            res_fs = control_youtube("fullscreen")
+            self.assertTrue(res_fs["success"])
+            self.assertEqual(res_fs["key"], "f")
+
+            res_mute = control_youtube("mute")
+            self.assertTrue(res_mute["success"])
+            self.assertEqual(res_mute["key"], "m")
+
+        # press_key
+        with patch("tools.input.send_hotkey", return_value={"success": True}) as mock_hk:
+            res_pk = press_key("enter")
+            self.assertTrue(res_pk["success"])
+            mock_hk.assert_called_with(["enter"])
+
+    def test_youtube_agent_command_dispatch(self):
+        from agent import handle_command
+
+        with patch("tools.browser.webbrowser.open"):
+            # The core user requirement: "open youtube type this and play video at 2 minute"
+            cont, msg = handle_command("open youtube type this and play video at 2 minute")
+            self.assertTrue(cont)
+            self.assertIn("Searching YouTube for 'this' (Cue playback at 02:00).", msg)
+
+            # Variation: "open youtube type lofi and play video at 2 minute"
+            cont, msg = handle_command("open youtube type lofi and play video at 2 minute")
+            self.assertTrue(cont)
+            self.assertIn("Searching YouTube for 'lofi' (Cue playback at 02:00).", msg)
+
+            # Variation: "play interstellar theme on youtube at 1:45"
+            cont, msg = handle_command("play interstellar theme on youtube at 1:45")
+            self.assertTrue(cont)
+            self.assertIn("Searching YouTube for 'interstellar theme' (Cue playback at 01:45).", msg)
+
+            # Direct video link with cue
+            cont, msg = handle_command("open youtube https://www.youtube.com/watch?v=dQw4w9WgXcQ at 2 minute")
+            self.assertTrue(cont)
+            self.assertIn("Playing YouTube video cued to 02:00", msg)
+
+            # YouTube controls
+            cont, msg = handle_command("youtube fullscreen")
+            self.assertTrue(cont)
+            self.assertIn("fullscreen", msg)
+
+            # Press key
+            with patch("agent.press_key", return_value={"message": "Pressed key 'enter'."}):
+                cont, msg = handle_command("press key enter")
+                self.assertTrue(cont)
+                self.assertEqual(msg, "Pressed key 'enter'.")
+
 
 if __name__ == "__main__":
     unittest.main()

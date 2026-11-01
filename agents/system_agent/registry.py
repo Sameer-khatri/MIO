@@ -91,7 +91,7 @@ TOOL_CATALOG = {
     "input": {
         "kit": "action",
         "description": "Global hotkey combinations, standard shortcut triggers (Win+E, Win+I, Alt+F4), and SendInput typing.",
-        "primary_actions": ["send_hotkey", "type_text", "show_desktop", "open_task_manager", "switch_app_alt_tab", "open_file_explorer", "open_windows_settings", "open_run_dialog", "close_active_window", "select_all", "copy_selection", "paste_selection"],
+        "primary_actions": ["send_hotkey", "press_key", "type_text", "show_desktop", "open_task_manager", "switch_app_alt_tab", "open_file_explorer", "open_windows_settings", "open_run_dialog", "close_active_window", "select_all", "copy_selection", "paste_selection"],
     },
     "clipboard": {
         "kit": "action",
@@ -162,7 +162,7 @@ TOOL_CATALOG = {
     "browser": {
         "kit": "connectivity",
         "description": "Open default browser, launch incognito/private windows, route to specific browser, and batch tabs.",
-        "primary_actions": ["open_url", "open_incognito", "open_with_browser", "open_multiple_urls", "get_default_browser"],
+        "primary_actions": ["open_url", "open_incognito", "open_with_browser", "open_multiple_urls", "get_default_browser", "open_youtube", "search_and_play_youtube", "control_youtube", "open_youtube_and_type"],
     },
     "power": {
         "kit": "connectivity",
@@ -312,6 +312,74 @@ def execute_action(tool_name: str, action_name: str, **kwargs) -> dict:
             "success": False,
             "message": f"Error executing '{clean_tool}.{clean_action}': {err}"
         }
+
+
+# Convenient alias
+execute_tool = execute_action
+
+
+def execute_workflow(steps: list[dict]) -> dict:
+    """
+    Executes a sequential multi-step workflow across MIO's Hands.
+    Each step should be a dictionary:
+    {
+        "tool": "browser",
+        "action": "open_youtube",
+        "args": {"query": "lofi", "timestamp": "2 minute"},
+        "ignore_error": False,  # optional
+        "delay": 0.5            # optional delay in seconds after step
+    }
+    """
+    if not steps or not isinstance(steps, (list, tuple)):
+        return {"success": False, "executed_steps": 0, "message": "Steps list cannot be empty."}
+
+    import time
+    results = []
+    for idx, step in enumerate(steps, start=1):
+        if not isinstance(step, dict):
+            return {
+                "success": False,
+                "executed_steps": len(results),
+                "total_steps": len(steps),
+                "results": results,
+                "message": f"Step #{idx} must be a dictionary."
+            }
+
+        tool = step.get("tool", "")
+        action = step.get("action", "")
+        args = step.get("args", {})
+        ignore_err = step.get("ignore_error", False)
+        delay = float(step.get("delay", 0))
+
+        res = execute_action(tool, action, **args)
+        results.append({
+            "step": idx,
+            "tool": tool,
+            "action": action,
+            "success": res.get("success", False),
+            "result": res
+        })
+
+        if not res.get("success", False) and not ignore_err:
+            return {
+                "success": False,
+                "failed_step": idx,
+                "executed_steps": len(results),
+                "total_steps": len(steps),
+                "results": results,
+                "message": f"Workflow failed at step #{idx} ({tool}.{action}): {res.get('message', 'Unknown error')}"
+            }
+
+        if delay > 0:
+            time.sleep(delay)
+
+    return {
+        "success": True,
+        "executed_steps": len(results),
+        "total_steps": len(steps),
+        "results": results,
+        "message": f"Successfully executed all {len(results)} workflow step(s)."
+    }
 
 
 def get_schemas(kit_name: str = None) -> list[dict]:

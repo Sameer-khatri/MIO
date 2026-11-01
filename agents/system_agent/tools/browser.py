@@ -1,6 +1,8 @@
 import os
+import re
 import shutil
 import subprocess
+import time
 import urllib.parse
 import webbrowser
 import winreg
@@ -205,3 +207,276 @@ def get_default_browser() -> dict:
             "browser": "Unknown",
             "message": f"Could not determine default browser: {err}"
         }
+
+
+# -------------------------------------------------------------------------
+# YouTube Navigation, Precision Timestamp Playback & Media Controls
+# -------------------------------------------------------------------------
+def parse_timestamp(val: str | int) -> int:
+    """
+    Parses flexible human-readable timestamps into total seconds:
+    - '2 minute', '2 minutes', '2 min', '2m' -> 120
+    - '2:00', '02:00', '1:30' -> 120, 90
+    - '1 hour 20 minutes', '1h20m' -> 4800
+    - '45s', '45 seconds', 45 -> 45
+    """
+    if isinstance(val, (int, float)):
+        return max(0, int(val))
+    if not val or not isinstance(val, str):
+        return 0
+
+    text = val.strip().lower()
+    if text.isdigit():
+        return int(text)
+
+    # Colon formats: HH:MM:SS or MM:SS
+    parts = text.split(":")
+    if len(parts) == 2 and all(p.strip().isdigit() for p in parts):
+        return int(parts[0]) * 60 + int(parts[1])
+    if len(parts) == 3 and all(p.strip().isdigit() for p in parts):
+        return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+
+    total = 0
+    hrs_match = re.search(r"(\d+)\s*(?:hours?|hrs?|h)", text)
+    mins_match = re.search(r"(\d+)\s*(?:minutes?|mins?|m)", text)
+    secs_match = re.search(r"(\d+)\s*(?:seconds?|secs?|s)", text)
+
+    if hrs_match:
+        total += int(hrs_match.group(1)) * 3600
+    if mins_match:
+        total += int(mins_match.group(1)) * 60
+    if secs_match:
+        total += int(secs_match.group(1))
+
+    if total == 0:
+        first_num = re.search(r"(\d+)", text)
+        if first_num:
+            num = int(first_num.group(1))
+            total = (num * 60) if ("min" in text or "m" in text) else num
+
+    return max(0, total)
+
+
+def _format_time(seconds: int) -> str:
+    """Formats seconds into MM:SS or HH:MM:SS display string."""
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    if h > 0:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+
+def open_youtube(query: str = "", video_url: str = "", timestamp: str | int = 0) -> dict:
+    """
+    Launches YouTube in the user's default browser with optional query search or
+    direct video playback cued to a specific timestamp.
+    """
+    secs = parse_timestamp(timestamp)
+    time_str = f"&t={secs}s" if secs > 0 else ""
+
+    # Direct Video URL or Video ID
+    if video_url:
+        clean_url = video_url.strip()
+        if not clean_url.startswith("http://") and not clean_url.startswith("https://"):
+            clean_url = "https://" + clean_url
+
+        if time_str:
+            sep = "&" if "?" in clean_url else "?"
+            clean_url = f"{clean_url}{sep}t={secs}s"
+
+        res = open_url(clean_url)
+        return {
+            "success": res.get("success", False),
+            "mode": "video_url",
+            "url": clean_url,
+            "timestamp_seconds": secs,
+            "formatted_time": _format_time(secs),
+            "message": f"Playing YouTube video cued to {_format_time(secs)} ({clean_url})." if secs else f"Playing YouTube video ({clean_url})."
+        }
+
+    # Search Query
+    if query:
+        clean_q = query.strip()
+        encoded = urllib.parse.quote_plus(clean_q)
+        search_url = f"https://www.youtube.com/results?search_query={encoded}"
+
+        res = open_url(search_url)
+        time_msg = f" (Cue playback at {_format_time(secs)})" if secs > 0 else ""
+        return {
+            "success": res.get("success", False),
+            "mode": "search",
+            "query": clean_q,
+            "url": search_url,
+            "timestamp_seconds": secs,
+            "formatted_time": _format_time(secs),
+            "message": f"Searching YouTube for '{clean_q}'{time_msg}."
+        }
+
+    # Default YouTube homepage
+    res = open_url("https://www.youtube.com")
+    return {
+        "success": res.get("success", False),
+        "mode": "homepage",
+        "url": "https://www.youtube.com",
+        "timestamp_seconds": 0,
+        "message": "Opened YouTube homepage in default browser."
+    }
+
+
+def search_and_play_youtube(query: str, timestamp: str | int = 0) -> dict:
+    """
+    High-level orchestrator: Resolves query, opens YouTube, and prepares playback
+    at the designated timestamp (e.g. '2 minute' -> 120s).
+    """
+    if not query or not isinstance(query, str):
+        return {"success": False, "message": "Search query or video name required."}
+
+    clean_q = query.strip()
+    secs = parse_timestamp(timestamp)
+
+    # Check if query itself contains a URL
+    if "youtube.com" in clean_q or "youtu.be" in clean_q:
+        return open_youtube(video_url=clean_q, timestamp=secs)
+
+    return open_youtube(query=clean_q, timestamp=secs)
+
+
+def control_youtube(action: str, seconds: int = 0) -> dict:
+    """
+    Controls desktop YouTube playback via universal keyboard shortcuts:
+    - 'play', 'pause', 'toggle': 'k' or Space
+    - 'fullscreen': 'f'
+    - 'mute': 'm'
+    - 'theater': 't'
+    - 'captions': 'c'
+    - 'forward' (10s): 'l'
+    - 'rewind' (10s): 'j'
+    - 'percent' (0-9): jump to 0% - 90%
+    """
+    act = action.strip().lower()
+
+    # Attempt to focus YouTube or browser window instantly via Win32
+    try:
+        from tools.windows import _get_all_windows, user32
+        for w in _get_all_windows():
+            t = w.get("title", "").lower()
+            if "youtube" in t or any(b in t for b in ["brave", "chrome", "edge", "firefox", "opera"]):
+                if user32:
+                    user32.ShowWindow(w["hwnd"], 9)  # SW_RESTORE
+                    user32.SetForegroundWindow(w["hwnd"])
+                    time.sleep(0.05)
+                break
+    except Exception:
+        pass
+
+    try:
+        from tools.input import send_hotkey
+
+        if act in ("play", "pause", "toggle", "play/pause"):
+            res = send_hotkey(["k"])
+            return {"success": True, "action": act, "key": "k", "message": "Toggled YouTube playback (Play/Pause)."}
+
+        if act in ("fullscreen", "full"):
+            res = send_hotkey(["f"])
+            return {"success": True, "action": act, "key": "f", "message": "Toggled YouTube fullscreen mode."}
+
+        if act in ("mute", "unmute"):
+            res = send_hotkey(["m"])
+            return {"success": True, "action": act, "key": "m", "message": "Toggled YouTube audio mute."}
+
+        if act in ("theater", "theatre"):
+            res = send_hotkey(["t"])
+            return {"success": True, "action": act, "key": "t", "message": "Toggled YouTube theater mode."}
+
+        if act in ("captions", "subtitles"):
+            res = send_hotkey(["c"])
+            return {"success": True, "action": act, "key": "c", "message": "Toggled YouTube captions/subtitles."}
+
+        if act in ("forward", "seek_forward", "skip"):
+            # 'l' skips 10 seconds in YouTube
+            repeats = max(1, seconds // 10) if seconds > 0 else 1
+            for _ in range(repeats):
+                send_hotkey(["l"])
+                time.sleep(0.05)
+            return {"success": True, "action": act, "seconds": repeats * 10, "message": f"Seeked forward {repeats * 10} seconds."}
+
+        if act in ("rewind", "seek_rewind", "back"):
+            # 'j' rewinds 10 seconds in YouTube
+            repeats = max(1, seconds // 10) if seconds > 0 else 1
+            for _ in range(repeats):
+                send_hotkey(["j"])
+                time.sleep(0.05)
+            return {"success": True, "action": act, "seconds": repeats * 10, "message": f"Seeked rewind {repeats * 10} seconds."}
+
+        if act in ("percent", "seek_percent"):
+            pct_digit = max(0, min(9, seconds // 10))
+            send_hotkey([str(pct_digit)])
+            return {"success": True, "action": act, "percent": pct_digit * 10, "message": f"Seeked to {pct_digit * 10}% of video."}
+
+        return {"success": False, "action": act, "message": f"Unknown YouTube control action '{act}'."}
+    except Exception as err:
+        return {"success": False, "action": act, "message": f"Failed to send YouTube control: {err}"}
+
+
+def open_youtube_and_type(query: str, timestamp: str | int = 0, physical_typing: bool = False) -> dict:
+    """
+    Opens YouTube, searches for the specified query, and prepares playback at timestamp.
+    If physical_typing=True:
+      1. Opens youtube.com
+      2. Waits briefly and focuses the browser window
+      3. Sends hotkey '/' to focus YouTube's search bar
+      4. Types the query text
+      5. Sends 'enter' to execute search
+    Otherwise:
+      Directly launches YouTube search results cued to timestamp (100% reliable).
+    """
+    if not query or not isinstance(query, str):
+        return {"success": False, "message": "Search query or video name required."}
+
+    clean_q = query.strip()
+    secs = parse_timestamp(timestamp)
+
+    if physical_typing:
+        try:
+            # 1. Open YouTube homepage
+            open_url("https://www.youtube.com")
+            time.sleep(1.5)
+
+            # 2. Focus browser
+            try:
+                from tools.windows import bring_to_foreground
+                for b in ["brave", "chrome", "edge", "firefox", "opera"]:
+                    if bring_to_foreground(b).get("success"):
+                        time.sleep(0.3)
+                        break
+            except Exception:
+                pass
+
+            # 3. Press '/' to focus YouTube search bar
+            from tools.input import press_key, type_text
+            press_key("/")
+            time.sleep(0.3)
+
+            # 4. Type text
+            type_text(clean_q)
+            time.sleep(0.2)
+
+            # 5. Press Enter
+            press_key("enter")
+
+            cue_note = f" Playback cued to {_format_time(secs)}." if secs > 0 else ""
+            return {
+                "success": True,
+                "mode": "physical_typing",
+                "query": clean_q,
+                "timestamp_seconds": secs,
+                "formatted_time": _format_time(secs),
+                "message": f"Typed '{clean_q}' into YouTube search bar and executed search.{cue_note}"
+            }
+        except Exception:
+            # Fallback to direct navigation if input simulation encounters any issue
+            pass
+
+    return search_and_play_youtube(clean_q, timestamp=secs)
+

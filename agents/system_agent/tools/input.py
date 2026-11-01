@@ -78,6 +78,11 @@ def send_hotkey(keys: list[str]) -> dict:
     }
 
 
+def press_key(key: str) -> dict:
+    """Presses and releases a single key (e.g. 'enter', 'space', 'esc', 'tab', 'k', 'f', 'm')."""
+    return send_hotkey([key])
+
+
 def show_desktop() -> dict:
     """Simulates Win + D to minimize all windows and show desktop."""
     return send_hotkey(["win", "d"])

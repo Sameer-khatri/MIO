@@ -102,6 +102,7 @@ from tools.input import (
     close_active_window,
     send_hotkey,
     type_text,
+    press_key,
 )
 from tools.power import (
     lock_workstation,
@@ -129,6 +130,11 @@ from tools.browser import (
     open_incognito,
     open_with_browser,
     get_default_browser,
+    open_youtube,
+    search_and_play_youtube,
+    control_youtube,
+    open_youtube_and_type,
+    parse_timestamp,
 )
 from tools.mouse import (
     get_cursor_position,
@@ -431,6 +437,10 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         parts = [p.strip() for p in re.split(r"[\+\s]+", raw_keys) if p.strip()]
         res = send_hotkey(parts)
         return True, res.get("message")
+    if lower_input.startswith("press key ") or lower_input.startswith("press "):
+        k = re.sub(r"^(press key|press)\s+", "", cleaned, flags=re.I).strip()
+        res = press_key(k)
+        return True, res.get("message")
 
     # 8. Power & Session Hands
     if lower_input in ("lock screen", "lock workstation", "lock computer", "lock pc"):
@@ -529,6 +539,62 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     if lower_input.startswith("open incognito") or lower_input.startswith("incognito"):
         target_url = re.sub(r"^(open incognito|incognito)\s*", "", cleaned, flags=re.I).strip()
         res = open_incognito(target_url)
+        return True, res.get("message")
+
+    # 11.5 YouTube Hands (Search, Cue Playback & Controls)
+    # Pattern: "open youtube type <query> and play (video )?at <timestamp>"
+    # e.g.: "open youtube type this and play video at 2 minute"
+    # e.g.: "open youtube and search lofi and play at 120s"
+    yt_type_play = re.match(
+        r"^(?:open\s+youtube\s+(?:and\s+)?(?:type|search\s+for|search)\s+)(.+?)(?:\s+and\s+play(?:\s+video)?\s+at\s+(.+))?$",
+        cleaned,
+        flags=re.IGNORECASE
+    )
+    if yt_type_play:
+        query_val = yt_type_play.group(1).strip()
+        time_val = yt_type_play.group(2)
+        timestamp = time_val.strip() if time_val else 0
+        res = search_and_play_youtube(query_val, timestamp=timestamp)
+        return True, res.get("message")
+
+    # Pattern: "play <query> on youtube (at <timestamp>)?"
+    # e.g.: "play lofi hip hop on youtube at 2 minute"
+    yt_play_on = re.match(
+        r"^play\s+(.+?)\s+on\s+youtube(?:\s+at\s+(.+))?$",
+        cleaned,
+        flags=re.IGNORECASE
+    )
+    if yt_play_on:
+        query_val = yt_play_on.group(1).strip()
+        time_val = yt_play_on.group(2)
+        timestamp = time_val.strip() if time_val else 0
+        res = search_and_play_youtube(query_val, timestamp=timestamp)
+        return True, res.get("message")
+
+    # Pattern: "open youtube" or "youtube"
+    if lower_input in ("open youtube", "youtube"):
+        res = open_youtube()
+        return True, res.get("message")
+
+    # Pattern: "open youtube <query or url> (at <timestamp>)?"
+    if lower_input.startswith("open youtube "):
+        rest = cleaned[13:].strip()
+        time_split = re.search(r"\s+at\s+([\w\d\:\s]+)$", rest, flags=re.IGNORECASE)
+        if time_split:
+            target = rest[:time_split.start()].strip()
+            t_val = time_split.group(1).strip()
+            res = search_and_play_youtube(target, timestamp=t_val)
+        else:
+            res = search_and_play_youtube(rest)
+        return True, res.get("message")
+
+    # Pattern: "youtube play", "youtube pause", "youtube mute", "youtube fullscreen", "youtube forward 30s", "youtube rewind 20s"
+    if lower_input.startswith("youtube "):
+        ctrl_action = lower_input[8:].strip()
+        sec_m = re.search(r"(\d+)", ctrl_action)
+        secs = int(sec_m.group(1)) if sec_m else 0
+        act_word = re.sub(r"\d+.*$", "", ctrl_action).strip()
+        res = control_youtube(act_word or ctrl_action, seconds=secs)
         return True, res.get("message")
 
     # 12. Mouse Control Hands
