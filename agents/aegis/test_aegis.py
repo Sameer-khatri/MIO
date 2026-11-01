@@ -4,7 +4,9 @@ Covers 100% of diagnostic endpoints, scoring algorithms, prescriptions,
 treatments, consultations, and fallback routines.
 """
 
+import json
 import os
+import time
 import unittest
 from unittest.mock import MagicMock, call, patch
 
@@ -302,5 +304,114 @@ class TestAegisDoctor(unittest.TestCase):
             self.assertGreaterEqual(rep["health_score"], 80)
 
 
+    # -------------------------------------------------------------------------
+    # 11. Antivirus & Threat Triage Tests
+    # -------------------------------------------------------------------------
+    def test_antivirus_scan_running_processes_masquerade(self):
+        fake_procs = json.dumps([
+            {
+                "ProcessId": 1111,
+                "Name": "svchost.exe",
+                "ExecutablePath": r"C:\Users\User\AppData\Local\Temp\svchost.exe",
+                "CommandLine": r"C:\Users\User\AppData\Local\Temp\svchost.exe -stealth",
+            },
+            {
+                "ProcessId": 2222,
+                "Name": "invoice.pdf.exe",
+                "ExecutablePath": r"C:\Users\User\Downloads\invoice.pdf.exe",
+                "CommandLine": "invoice.pdf.exe",
+            },
+            {
+                "ProcessId": 3333,
+                "Name": "notepad.exe",
+                "ExecutablePath": r"C:\Windows\System32\notepad.exe",
+                "CommandLine": "notepad.exe",
+            }
+        ])
+        with patch("subprocess.check_output", return_value=fake_procs):
+            res = self.doc.antivirus.scan_running_processes()
+            self.assertTrue(res["success"])
+            self.assertEqual(res["processes_scanned"], 3)
+            self.assertEqual(res["threats_count"], 2)
+            types = [t["type"] for t in res["threats"]]
+            self.assertIn("CRITICAL_MASQUERADE", types)
+            self.assertIn("DOUBLE_EXTENSION_EXECUTION", types)
+
+    def test_antivirus_scan_file_and_quarantine(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_file = os.path.join(tmpdir, "fake_doc.pdf.exe")
+            with open(test_file, "wb") as f:
+                f.write(b"MZ\x90\x00\x03\x00\x00\x00") # Fake MZ PE header
+
+            scan_res = self.doc.antivirus.scan_file(test_file)
+            self.assertTrue(scan_res["success"])
+            self.assertTrue(scan_res["is_threat"])
+            self.assertEqual(scan_res["severity"], "CRITICAL")
+
+            # Quarantine file
+            q_res = self.doc.antivirus.quarantine_file(test_file)
+            self.assertTrue(q_res["success"])
+            self.assertFalse(os.path.exists(test_file))
+            self.assertTrue(os.path.exists(q_res["quarantine_path"]))
+
+            # List quarantine
+            q_list = self.doc.antivirus.list_quarantine()
+            self.assertTrue(q_list["success"])
+            self.assertGreaterEqual(q_list["total_quarantined"], 1)
+
+    # -------------------------------------------------------------------------
+    # 12. Sentinel Continuous Surveying Tests
+    # -------------------------------------------------------------------------
+    def test_sentinel_start_and_stop(self):
+        s = self.doc.sentinel
+        start_res = s.start(poll_interval=1.0, auto_heal_ram=True)
+        self.assertTrue(start_res["success"])
+        self.assertTrue(s.is_running())
+
+        time.sleep(0.1)
+
+        status = s.get_status()
+        self.assertTrue(status["running"])
+        self.assertEqual(status["poll_interval"], 1.0)
+
+        card = s.format_status_card()
+        self.assertIn("AEGIS SENTINEL", card)
+
+        stop_res = s.stop()
+        self.assertTrue(stop_res["success"])
+        self.assertFalse(s.is_running())
+
+    def test_sentinel_survey_once_auto_heal(self):
+        with patch.object(self.doc, "diagnose_battery", return_value={"power_source": "On Battery (DC)", "charge_percent": 18, "is_critical": False, "is_low": True, "is_charging": False}), \
+             patch.object(self.doc, "diagnose_memory_and_leaks", return_value={"load_percent": 88}), \
+             patch.object(self.doc, "diagnose_thermal_and_power", return_value={"cpu_load_percent": 88.0}), \
+             patch.object(self.doc, "diagnose_storage", return_value={"c_drive_free_gb": 12.0}), \
+             patch.object(self.doc, "apply_treatment", return_value={"details": {"ram": {"reclaimed_gb": 2.1}}}):
+
+            s = self.doc.sentinel
+            s.last_ac_status = "Plugged in (AC)" # trigger disconnect alert
+            snapshot = s.survey_once()
+            self.assertEqual(snapshot["ram_load_percent"], 88)
+            self.assertEqual(snapshot["cpu_load_percent"], 88.0)
+            self.assertEqual(snapshot["free_disk_gb"], 12.0)
+
+            # Check alerts logged
+            levels = [a["level"] for a in s.alerts]
+            self.assertIn("WARNING", levels)
+            self.assertIn("AUTO_HEAL", levels)
+
+    def test_doctor_consult_virus_and_survey(self):
+        with patch.object(self.doc, "scan_threats", return_value={"security_grade": "SECURE", "verdict": "Zero active malware", "total_threats": 0}):
+            c_virus = self.doc.doctor_consult("scan my pc for any virus or trojan malware")
+            self.assertTrue(c_virus["success"])
+            self.assertIn("Security Threat Audit", c_virus["doctor_diagnosis"])
+
+        c_survey = self.doc.doctor_consult("enable continuous background surveying for my laptop")
+        self.assertTrue(c_survey["success"])
+        self.assertIn("Sentinel 24/7 Monitor", c_survey["doctor_diagnosis"])
+
+
 if __name__ == "__main__":
     unittest.main()
+

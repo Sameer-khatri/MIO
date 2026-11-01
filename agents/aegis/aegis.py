@@ -34,6 +34,13 @@ except (AttributeError, OSError):
     kernel32 = None
     user32 = None
 
+try:
+    from .antivirus import AegisAntivirus
+    from .sentinel import AegisSentinel
+except ImportError:
+    from antivirus import AegisAntivirus
+    from sentinel import AegisSentinel
+
 
 # --- Windows Native Structures ---
 class SYSTEM_POWER_STATUS(ctypes.Structure):
@@ -96,6 +103,46 @@ class AegisDoctor:
 
     def __init__(self, name: str = "Dr. Aegis"):
         self.name = name
+        self.antivirus = AegisAntivirus()
+        self.sentinel = AegisSentinel(doctor=self)
+
+    # ---------------------------------------------------------
+    # Antivirus & Threat Triage Methods
+    # ---------------------------------------------------------
+    def scan_threats(self) -> Dict[str, Any]:
+        """Scans running processes, registry persistence, and temp for malware."""
+        return self.antivirus.quick_scan()
+
+    def scan_file(self, filepath: str) -> Dict[str, Any]:
+        """Inspects file for malicious extensions, PE headers, and known hashes."""
+        return self.antivirus.scan_file(filepath)
+
+    def scan_directory(self, folder_path: str, max_files: int = 200) -> Dict[str, Any]:
+        """Scans all files in a directory for malware signatures."""
+        return self.antivirus.scan_directory(folder_path, max_files=max_files)
+
+    def quarantine_file(self, filepath: str) -> Dict[str, Any]:
+        """Safely isolates a suspicious file into the quarantine vault."""
+        return self.antivirus.quarantine_file(filepath)
+
+    def list_quarantine(self) -> Dict[str, Any]:
+        """Lists all files neutralized in the quarantine vault."""
+        return self.antivirus.list_quarantine()
+
+    # ---------------------------------------------------------
+    # Sentinel Continuous Background Surveying Methods
+    # ---------------------------------------------------------
+    def start_sentinel(self, poll_interval: float = 6.0, auto_heal_ram: bool = True) -> Dict[str, Any]:
+        """Activates continuous 24/7 background telemetry & auto-healing."""
+        return self.sentinel.start(poll_interval=poll_interval, auto_heal_ram=auto_heal_ram)
+
+    def stop_sentinel(self) -> Dict[str, Any]:
+        """Deactivates continuous background surveying."""
+        return self.sentinel.stop()
+
+    def get_sentinel_status(self) -> Dict[str, Any]:
+        """Returns Sentinel live operational status."""
+        return self.sentinel.get_status()
 
     # ---------------------------------------------------------
     # 1. Battery & Power Diagnostics
@@ -677,6 +724,23 @@ class AegisDoctor:
             cures.append("Execute network cure: flush DNS resolver with 'dns'.")
             cures.append("Verify Wi-Fi channel interference or switch to 5GHz band.")
 
+        if any(w in text for w in ["virus", "infected", "malware", "trojan", "hacked", "security", "threat", "antivirus", "scan"]):
+            sec = self.scan_threats()
+            diagnosis.append(f"Security Threat Audit: [{sec.get('security_grade')}] {sec.get('verdict')}.")
+            if sec.get("total_threats", 0) > 0:
+                cures.append(f"CRITICAL: Found {sec.get('total_threats')} threat(s). Run 'scan' or 'quarantine' to neutralize them.")
+            else:
+                cures.append("Zero malware or masquerading processes detected. Your system security is intact.")
+
+        if any(w in text for w in ["survey", "sentinel", "monitor", "watch", "background", "continuous"]):
+            status = self.get_sentinel_status()
+            state = "ACTIVE" if status.get("running") else "IDLE"
+            diagnosis.append(f"Sentinel 24/7 Monitor: Currently [{state}] (Surveys completed: {status.get('surveys_completed')}).")
+            if not status.get("running"):
+                cures.append("Type 'survey on' to engage continuous 24/7 background telemetry and automatic RAM pressure relief.")
+            else:
+                cures.append("Sentinel is actively guarding battery, memory leaks, and thermal spikes in the background.")
+
         if not diagnosis:
             score = self.calculate_health_score()
             diagnosis.append(f"General Checkup: Overall Health Score is {score['health_score']}/100 [{score['grade']}].")
@@ -741,6 +805,8 @@ Diagnosis: {score['summary']}
 - Disk (C:): {storage.get('c_drive_free_gb')} GB Free ({storage.get('c_drive_used_percent')}% used) | Clutter: {storage.get('temp_clutter_mb')} MB
 - Power Scheme: {power.get('active_power_scheme')} | CPU: {power.get('cpu_load_percent')}% | {power.get('thermal_state')}
 - Boot Bloat: {startup.get('total_startup_items')} items ({startup.get('high_impact_count')} High Impact)
+- Antivirus Security: [{self.antivirus.quick_scan().get('security_grade', 'CLEAN')}]
+- Sentinel 24/7 Monitor: {'ACTIVE' if self.sentinel.is_running() else 'IDLE'}
 
 [PRESCRIPTIONS]
 """
@@ -858,16 +924,71 @@ def run_cli():
             elif lower_q in ("score", "health", "checkup", "vitals"):
                 res = doctor.full_checkup()
                 print(res["report_card"])
+            elif lower_q in ("scan", "virus", "antivirus", "check threats"):
+                print("\n[AEGIS SHIELD] Running deep system security and threat audit...")
+                sec = doctor.scan_threats()
+                print(sec["summary_report"])
+                print()
+            elif lower_q.startswith("scan "):
+                target_path = query[5:].strip().strip('"').strip("'")
+                print(f"\n[AEGIS SHIELD] Scanning target: '{target_path}'...")
+                if os.path.isdir(target_path):
+                    res = doctor.scan_directory(target_path)
+                    print(res["message"])
+                    if res.get("threats"):
+                        for t in res["threats"]:
+                            print(f"  - [THREAT] {t['filename']}: {', '.join(t.get('threats', []))}")
+                elif os.path.isfile(target_path):
+                    res = doctor.scan_file(target_path)
+                    print(res["message"])
+                else:
+                    print(f"Target '{target_path}' not found.\n")
+                print()
+            elif lower_q.startswith("quarantine "):
+                target_file = query[11:].strip().strip('"').strip("'")
+                if target_file.lower() == "list":
+                    qlist = doctor.list_quarantine()
+                    print(f"\n[AEGIS QUARANTINE VAULT] Total Neutralized: {qlist['total_quarantined']} file(s)")
+                    for it in qlist.get("items", []):
+                        print(f"  - {it['name']} ({it['size_bytes']} bytes, isolated {it['quarantined_at']})")
+                    print()
+                else:
+                    print(f"\n[AEGIS SHIELD] Isolating file to quarantine vault: '{target_file}'...")
+                    q_res = doctor.quarantine_file(target_file)
+                    print(f"Result: {q_res['message']}\n")
+            elif lower_q in ("survey on", "monitor on", "watch on", "start survey"):
+                print("\n[AEGIS SENTINEL] Engaging 24/7 background telemetry daemon...")
+                s_res = doctor.start_sentinel(poll_interval=5.0, auto_heal_ram=True)
+                print(f"Result: {s_res['message']}")
+                print("Sentinel is now actively surveying battery, RAM leaks, thermal spikes, and frozen windows.\n")
+            elif lower_q in ("survey off", "monitor off", "watch off", "stop survey"):
+                print("\n[AEGIS SENTINEL] Disengaging background telemetry daemon...")
+                s_res = doctor.stop_sentinel()
+                print(f"Result: {s_res['message']}\n")
+            elif lower_q in ("survey", "sentinel", "monitor", "watch", "status", "alerts"):
+                print(doctor.sentinel.format_status_card())
+                print()
             elif lower_q in ("help", "?"):
-                print("\n[AEGIS DOCTOR COMMANDS]")
-                print("  heal     - Apply full treatment (RAM trim + DNS flush + temp cache purge)")
-                print("  ram      - Trim RAM working sets across running apps")
-                print("  dns      - Flush Windows DNS resolver cache")
-                print("  cache    - Safely purge stale %TEMP% files (>1h old)")
-                print("  startup  - List all startup programs and boot bottlenecks")
-                print("  score    - Generate full hardware clinic report & vitals")
-                print("  quit     - Exit to PowerShell")
-                print("  <text>   - Or describe any issue in plain English!\n")
+                print("\n[AEGIS DOCTOR & GUARDIAN COMMANDS]")
+                print("  --- Hardware & Triage ---")
+                print("  heal        - Full cure (RAM trim + DNS flush + temp cache purge)")
+                print("  ram         - Instantly trim idle RAM working sets across apps")
+                print("  dns         - Flush Windows DNS resolver cache")
+                print("  cache       - Safely purge stale %TEMP% files (>1h old)")
+                print("  startup     - List all startup programs and boot bottlenecks")
+                print("  score       - Generate complete hardware clinic report card")
+                print("  --- Antivirus & Threat Hunter ---")
+                print("  scan        - Full security audit (process masquerade, persistence, stealth cmd)")
+                print("  scan <path> - Scan specific file or folder for malware signatures")
+                print("  quarantine <path> - Safely neutralize & isolate suspicious file into vault")
+                print("  quarantine list   - List files safely held in quarantine vault")
+                print("  --- Sentinel 24/7 Monitor ---")
+                print("  survey on   - Start continuous background surveillance & auto-RAM trimming")
+                print("  survey off  - Stop continuous background surveillance")
+                print("  survey      - Show live Sentinel telemetry status & recent alert log")
+                print("  --- General ---")
+                print("  quit        - Exit to PowerShell")
+                print("  <text>      - Or describe any symptom or issue in plain English!\n")
             else:
                 consult = doctor.doctor_consult(query)
                 print(f"\n{consult['doctor_verdict']}\n")
