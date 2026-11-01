@@ -209,6 +209,14 @@ from tools.drives import (
     check_drive_space_warning,
     eject_usb_drive,
 )
+from tools.healer import (
+    auto_heal_system,
+    trim_all_memory,
+    detect_hung_windows,
+    heal_network,
+    heal_stuck_ports,
+    heal_temp_cache,
+)
 
 
 
@@ -845,8 +853,22 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         res = list_drives()
         return True, res.get("message")
 
-
-
+    # 26. Self-Healing commands
+    if lower_input in ("auto heal", "heal system", "self heal", "auto heal system", "heal pc", "system heal"):
+        res = auto_heal_system()
+        return True, res.get("message")
+    if lower_input in ("trim ram", "trim memory", "free ram", "heal ram", "clean ram"):
+        res = trim_all_memory()
+        return True, res.get("message")
+    if lower_input in ("heal network", "fix internet", "flush dns and reconnect"):
+        res = heal_network()
+        return True, res.get("message")
+    if lower_input in ("check frozen apps", "hung windows", "frozen windows", "detect hung windows"):
+        res = detect_hung_windows()
+        return True, res.get("message")
+    if lower_input in ("heal cache", "clean temp files", "clean cache", "heal temp"):
+        res = heal_temp_cache()
+        return True, res.get("message")
 
     # 10. System Information commands
     if lower_input in ("show system info", "system info"):

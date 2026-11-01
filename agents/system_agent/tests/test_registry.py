@@ -42,8 +42,8 @@ class TestRegistry(unittest.TestCase):
     def test_all_tools_catalog(self):
         tools_res = list_all_tools()
         self.assertTrue(tools_res["success"])
-        self.assertEqual(tools_res["total_tools"], 25)
-        self.assertEqual(len(TOOL_CATALOG), 25)
+        self.assertEqual(tools_res["total_tools"], 26)
+        self.assertEqual(len(TOOL_CATALOG), 26)
 
     def test_get_tool_module_dynamic_load(self):
         audio_mod = get_tool_module("audio")

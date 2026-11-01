@@ -1,6 +1,6 @@
 # MIO System Agent & Hands Inventory
 
-The **MIO System Agent** is MIO's execution body—the physical and digital "hands" that interact directly with the local Windows operating system. It provides 25 completely decoupled, zero-dependency tools organized into 5 modular **Hand Kits**, exposed through a centralized **Inventory Registry**.
+The **MIO System Agent** is MIO's execution body—the physical and digital "hands" that interact directly with the local Windows operating system. It provides 26 completely decoupled, zero-dependency tools organized into 5 modular **Hand Kits**, exposed through a centralized **Inventory Registry**.
 
 ---
 
@@ -14,7 +14,7 @@ agents/system_agent/
 ├── agent.py                    # Terminal interactive interface (command loop)
 ├── app_memory.json             # Local machine app memory & alias database (git-ignored)
 │
-├── tools/                      # 25 Standalone, Decoupled Windows Tools
+├── tools/                      # 26 Standalone, Decoupled Windows Tools
 │   │
 │   ├── [Sensory Hand]
 │   ├── screen.py               # Screenshots (full & bounding-box regions) + PNG binary dimension parser
@@ -49,11 +49,12 @@ agents/system_agent/
 │       ├── settings.py         # Dark/light theme query & toggle, desktop wallpaper get/set & transparency
 │       ├── services.py         # Windows services list, status, start, stop, restart & startup configuration
 │       ├── system_info.py      # CPU usage/cores/threads, RAM capacity/load, GPU specs & motherboard BIOS
-│       └── timer.py            # Countdown timers with sound, system uptime duration & multi-lap stopwatch
+│       ├── timer.py            # Countdown timers with sound, system uptime duration & multi-lap stopwatch
+│       └── healer.py           # Self-healing engine: RAM trim, hung window recovery, DNS flush, cache purge
 │
 └── tests/
-    ├── test_registry.py        # Tests for Hand Kits, catalog enumeration & dynamic action dispatch
-    └── test_system_agent.py    # Exhaustive unit test suite covering all 25 tools (128 tests)
+    ├── test_registry.py        # Tests for Hand Kits, catalog enumeration & dynamic action dispatch (6 tests)
+    └── test_system_agent.py    # Exhaustive unit test suite covering all 26 tools (130 tests)
 ```
 
 ---
@@ -66,7 +67,7 @@ agents/system_agent/
 | **`action`** | **Action Hand** | `mouse`, `input`, `clipboard` | Moves cursor, performs clicks and smooth drag-and-drops, triggers keyboard hotkeys, types text, and reads/writes clipboard. |
 | **`control`** | **Control Hand** | `applications`, `windows`, `processes`, `installed_apps` | Opens apps (standard and admin), snaps/pins windows, terminates processes, and discovers installed software. |
 | **`storage`** | **Storage Hand** | `filesystem`, `archive`, `drives`, `hasher` | Manipulates files and folders safely, computes folder sizes, creates/tests archives, and verifies cryptographic checksums. |
-| **`connectivity`** | **Connectivity Hand** | `network`, `wifi_tools`, `ports`, `browser`, `power`, `settings`, `services`, `system_info`, `timer` | Manages internet reachability, Wi-Fi connections, open ports, web browser sessions, power states, and Windows services. |
+| **`connectivity`** | **Connectivity Hand** | `network`, `wifi_tools`, `ports`, `browser`, `power`, `settings`, `services`, `system_info`, `timer`, `healer` | Manages internet reachability, Wi-Fi connections, open ports, web browser sessions, power states, self-healing, and Windows services. |
 
 ---
 

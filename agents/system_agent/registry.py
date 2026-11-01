@@ -44,8 +44,8 @@ HAND_KITS = {
     },
     "connectivity": {
         "name": "Connectivity Hand (Network, Web & System Services)",
-        "description": "Handles internet, Wi-Fi, network ports, browser sessions, power states, services, and hardware specs.",
-        "tools": ["network", "wifi_tools", "ports", "browser", "power", "settings", "services", "system_info", "timer"],
+        "description": "Handles internet, Wi-Fi, network ports, browser sessions, power states, services, self-healing, and hardware specs.",
+        "tools": ["network", "wifi_tools", "ports", "browser", "power", "settings", "services", "system_info", "timer", "healer"],
     },
 }
 
@@ -188,6 +188,11 @@ TOOL_CATALOG = {
         "kit": "connectivity",
         "description": "Background countdown timers with alert sound, Windows uptime duration, and precision stopwatches.",
         "primary_actions": ["start_countdown_timer", "list_active_timers", "get_uptime", "start_stopwatch", "lap_stopwatch", "stop_stopwatch"],
+    },
+    "healer": {
+        "kit": "connectivity",
+        "description": "Windows self-healing engine: RAM trimming, hung window recovery, DNS flush, port healing, and temp cache cleanup.",
+        "primary_actions": ["auto_heal_system", "trim_all_memory", "trim_process_memory", "detect_hung_windows", "heal_network", "heal_stuck_ports", "heal_temp_cache"],
     },
 }
 

@@ -2594,9 +2594,114 @@ class TestSystemAgent(unittest.TestCase):
             self.assertTrue(cont)
             self.assertEqual(msg, "Opened file")
 
+    def test_healer_tools(self):
+        from tools.healer import (
+            trim_process_memory,
+            trim_all_memory,
+            detect_hung_windows,
+            heal_network,
+            heal_stuck_ports,
+            heal_temp_cache,
+            auto_heal_system,
+        )
+
+        # 1. trim_process_memory
+        with patch("tools.healer.kernel32.OpenProcess", return_value=9999), \
+             patch("tools.healer.psapi.EmptyWorkingSet", return_value=1), \
+             patch("tools.healer.kernel32.CloseHandle"):
+            res = trim_process_memory(1234)
+            self.assertTrue(res["success"])
+            self.assertIn("Successfully trimmed", res["message"])
+
+        # 2. trim_all_memory
+        fake_tasklist = '"notepad.exe","1234","Console","1","10,000 K"\n"chrome.exe","5678","Console","1","50,000 K"\n'
+        with patch("tools.system_info.get_ram_usage", side_effect=[{"used_gb": 12.0}, {"used_gb": 9.5}]), \
+             patch("subprocess.check_output", return_value=fake_tasklist), \
+             patch("tools.healer.trim_process_memory", return_value={"success": True}):
+            res_all = trim_all_memory()
+            self.assertTrue(res_all["success"])
+            self.assertEqual(res_all["processes_trimmed"], 2)
+            self.assertEqual(res_all["reclaimed_gb"], 2.5)
+
+        # 3. detect_hung_windows
+        with patch("tools.healer.user32.EnumWindows") as mock_enum:
+            def fake_enum(cb, _):
+                # Call callback to simulate no hung windows
+                return True
+            mock_enum.side_effect = fake_enum
+            res_hung = detect_hung_windows()
+            self.assertTrue(res_hung["success"])
+            self.assertEqual(res_hung["count"], 0)
+
+        # 4. heal_network
+        with patch("subprocess.check_output", return_value=""), \
+             patch("socket.socket") as mock_sock:
+            mock_inst = mock_sock.return_value
+            mock_inst.connect.return_value = None
+            res_net = heal_network()
+            self.assertTrue(res_net["success"])
+            self.assertTrue(res_net["dns_flushed"])
+            self.assertTrue(res_net["internet_reachable"])
+
+        # 5. heal_stuck_ports
+        with patch("tools.ports.what_is_using_port", return_value={"success": True, "in_use": True, "pid": 4321, "process_name": "node.exe"}), \
+             patch("tools.ports.kill_port_process", return_value={"success": True}):
+            res_ports = heal_stuck_ports([3000])
+            self.assertTrue(res_ports["success"])
+            self.assertEqual(res_ports["healed_count"], 1)
+
+        # 6. heal_temp_cache
+        with patch("os.environ.get", return_value="C:\\FakeTemp"), \
+             patch("os.path.exists", return_value=True), \
+             patch("os.walk", return_value=[("C:\\FakeTemp", [], ["old.tmp"])]), \
+             patch("os.path.getmtime", return_value=0), \
+             patch("os.path.getsize", return_value=1024 * 1024 * 5), \
+             patch("os.remove"):
+            res_temp = heal_temp_cache()
+            self.assertTrue(res_temp["success"])
+            self.assertEqual(res_temp["files_cleaned"], 1)
+            self.assertEqual(res_temp["freed_mb"], 5.0)
+
+        # 7. auto_heal_system
+        with patch("tools.healer.trim_all_memory", return_value={"message": "Trimmed 5 GB"}), \
+             patch("tools.healer.heal_network", return_value={"message": "DNS Flushed"}), \
+             patch("tools.healer.detect_hung_windows", return_value={"message": "0 frozen"}), \
+             patch("tools.healer.heal_temp_cache", return_value={"message": "Cleared 200 MB"}):
+            res_auto = auto_heal_system()
+            self.assertTrue(res_auto["success"])
+            self.assertIn("System Self-Healing Complete", res_auto["message"])
+
+    def test_healer_agent_dispatch(self):
+        from agent import handle_command
+        with patch("agent.auto_heal_system", return_value={"message": "System fully healed"}):
+            cont, msg = handle_command("auto heal")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "System fully healed")
+
+        with patch("agent.trim_all_memory", return_value={"message": "Freed 3 GB RAM"}):
+            cont, msg = handle_command("trim ram")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Freed 3 GB RAM")
+
+        with patch("agent.heal_network", return_value={"message": "DNS Cache flushed"}):
+            cont, msg = handle_command("heal network")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "DNS Cache flushed")
+
+        with patch("agent.detect_hung_windows", return_value={"message": "No hung windows"}):
+            cont, msg = handle_command("check frozen apps")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "No hung windows")
+
+        with patch("agent.heal_temp_cache", return_value={"message": "Cleared 120 MB temp files"}):
+            cont, msg = handle_command("heal cache")
+            self.assertTrue(cont)
+            self.assertEqual(msg, "Cleared 120 MB temp files")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 
