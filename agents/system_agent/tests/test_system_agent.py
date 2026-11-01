@@ -2765,21 +2765,23 @@ class TestSystemAgent(unittest.TestCase):
     def test_youtube_agent_command_dispatch(self):
         from agent import handle_command
 
-        with patch("tools.browser.webbrowser.open"):
+        with patch("tools.browser.webbrowser.open"), \
+             patch("tools.browser.get_top_youtube_video_id", return_value="W0DM5lcj6mw"):
             # The core user requirement: "open youtube type this and play video at 2 minute"
             cont, msg = handle_command("open youtube type this and play video at 2 minute")
             self.assertTrue(cont)
-            self.assertIn("Searching YouTube for 'this' (Cue playback at 02:00).", msg)
+            self.assertIn("Playing 'this' on YouTube at 02:00", msg)
+            self.assertIn("&t=120s", msg)
 
             # Variation: "open youtube type lofi and play video at 2 minute"
             cont, msg = handle_command("open youtube type lofi and play video at 2 minute")
             self.assertTrue(cont)
-            self.assertIn("Searching YouTube for 'lofi' (Cue playback at 02:00).", msg)
+            self.assertIn("Playing 'lofi' on YouTube at 02:00", msg)
 
             # Variation: "play interstellar theme on youtube at 1:45"
             cont, msg = handle_command("play interstellar theme on youtube at 1:45")
             self.assertTrue(cont)
-            self.assertIn("Searching YouTube for 'interstellar theme' (Cue playback at 01:45).", msg)
+            self.assertIn("Playing 'interstellar theme' on YouTube at 01:45", msg)
 
             # Direct video link with cue
             cont, msg = handle_command("open youtube https://www.youtube.com/watch?v=dQw4w9WgXcQ at 2 minute")

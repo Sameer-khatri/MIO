@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import time
 import urllib.parse
+import urllib.request
 import webbrowser
 import winreg
 
@@ -324,10 +325,40 @@ def open_youtube(query: str = "", video_url: str = "", timestamp: str | int = 0)
     }
 
 
-def search_and_play_youtube(query: str, timestamp: str | int = 0) -> dict:
+def get_top_youtube_video_id(query: str) -> str | None:
     """
-    High-level orchestrator: Resolves query, opens YouTube, and prepares playback
-    at the designated timestamp (e.g. '2 minute' -> 120s).
+    Resolves the top YouTube video ID for a search query without requiring any API keys.
+    Returns the 11-character video ID (e.g. 'W0DM5lcj6mw') or None if unreachable.
+    """
+    if not query or not isinstance(query, str):
+        return None
+    try:
+        clean_q = query.strip()
+        encoded = urllib.parse.quote_plus(clean_q)
+        search_url = f"https://www.youtube.com/results?search_query={encoded}"
+        req = urllib.request.Request(
+            search_url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            }
+        )
+        with urllib.request.urlopen(req, timeout=4) as response:
+            html = response.read().decode("utf-8", errors="ignore")
+
+        matches = re.findall(r'/watch\?v=([a-zA-Z0-9_-]{11})', html) or re.findall(r'watch\?v=([a-zA-Z0-9_-]{11})', html)
+        for vid in matches:
+            if len(vid) == 11 and vid not in ("shorts", "feed", "channel"):
+                return vid
+    except Exception:
+        pass
+    return None
+
+
+def search_and_play_youtube(query: str, timestamp: str | int = 0, direct_play: bool = True) -> dict:
+    """
+    High-level orchestrator: Resolves query to the #1 video result, launches the video,
+    and cues playback directly at the designated timestamp (e.g. '2 minute' -> 120s).
     """
     if not query or not isinstance(query, str):
         return {"success": False, "message": "Search query or video name required."}
@@ -335,10 +366,22 @@ def search_and_play_youtube(query: str, timestamp: str | int = 0) -> dict:
     clean_q = query.strip()
     secs = parse_timestamp(timestamp)
 
-    # Check if query itself contains a URL
+    # Check if query itself contains a URL or video ID
     if "youtube.com" in clean_q or "youtu.be" in clean_q:
         return open_youtube(video_url=clean_q, timestamp=secs)
 
+    if direct_play:
+        top_vid = get_top_youtube_video_id(clean_q)
+        if top_vid:
+            direct_url = f"https://www.youtube.com/watch?v={top_vid}"
+            res = open_youtube(video_url=direct_url, timestamp=secs)
+            time_msg = f" at {_format_time(secs)}" if secs > 0 else ""
+            res["query"] = clean_q
+            res["video_id"] = top_vid
+            res["message"] = f"Playing '{clean_q}' on YouTube{time_msg} ({res.get('url')})."
+            return res
+
+    # Fallback to search results page
     return open_youtube(query=clean_q, timestamp=secs)
 
 
