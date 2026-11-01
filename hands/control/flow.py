@@ -165,6 +165,8 @@ def _execute_single_step(step: dict | str) -> dict:
             if yt_search_m:
                 sq = yt_search_m.group(1).strip()
                 res = search_web(sq, engine="youtube")
+                wait_for_window_state("youtube", expected_state="visible", timeout=2.0)
+                bring_to_foreground("youtube")
                 elapsed_ms = round((time.perf_counter() - step_start) * 1000, 1)
                 return {"success": True, "action": "search_youtube", "target": sq, "elapsed_ms": elapsed_ms, "message": res.get("message")}
 
@@ -190,6 +192,8 @@ def _execute_single_step(step: dict | str) -> dict:
                 return {"success": res.get("success", True), "action": "open_website", "target": raw_target, "elapsed_ms": elapsed_ms, "message": res.get("message")}
 
             res = open_application(raw_target)
+            wait_for_window_state(raw_target, expected_state="visible", timeout=2.0)
+            bring_to_foreground(raw_target)
             elapsed_ms = round((time.perf_counter() - step_start) * 1000, 1)
             return {"success": res.get("success", False), "action": "open_app", "target": raw_target, "elapsed_ms": elapsed_ms, "message": res.get("message")}
 

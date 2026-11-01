@@ -703,7 +703,7 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     # 11.5 YouTube Hands (Search, Cue Playback & Controls)
     # Pattern: "open youtube type <query> and play (video )?at <timestamp>"
     # e.g.: "open youtube type this and play video at 2 minute"
-    # e.g.: "open youtube and search lofi and play at 120s"
+    # e.g.: "open youtube search bbs" -> searches YouTube, does not auto-play
     yt_type_play = re.match(
         r"^(?:open\s+youtube\s+(?:and\s+)?(?:type|search\s+for|search)\s+)(.+?)(?:\s+and\s+play(?:\s+video)?\s+at\s+(.+))?$",
         cleaned,
@@ -712,8 +712,11 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     if yt_type_play:
         query_val = yt_type_play.group(1).strip()
         time_val = yt_type_play.group(2)
-        timestamp = time_val.strip() if time_val else 0
-        res = search_and_play_youtube(query_val, timestamp=timestamp)
+        if time_val is not None or "play" in cleaned.lower():
+            timestamp = time_val.strip() if time_val else 0
+            res = search_and_play_youtube(query_val, timestamp=timestamp)
+        else:
+            res = search_web(query_val, engine="youtube")
         return True, res.get("message")
 
     # Pattern: "play <query> on youtube (at <timestamp>)?"
@@ -743,8 +746,15 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
             target = rest[:time_split.start()].strip()
             t_val = time_split.group(1).strip()
             res = search_and_play_youtube(target, timestamp=t_val)
+        elif rest.lower().startswith("play "):
+            play_target = rest[5:].strip()
+            res = search_and_play_youtube(play_target)
+        elif rest.lower().startswith("search "):
+            search_target = rest[7:].strip()
+            res = search_web(search_target, engine="youtube")
         else:
-            res = search_and_play_youtube(rest)
+            # Default to search results page
+            res = open_youtube(query=rest)
         return True, res.get("message")
 
     # Pattern: "youtube play", "youtube pause", "youtube mute", "youtube fullscreen", "youtube forward 30s", "youtube rewind 20s"

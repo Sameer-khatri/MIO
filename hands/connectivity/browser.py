@@ -57,7 +57,9 @@ def search_web(query: str, engine: str = "google") -> dict:
 
     engine_norm = engine.strip().lower()
     if "youtube" in engine_norm:
-        search_url = f"https://www.youtube.com/results?search_query={encoded}"
+        lower_q = clean_q.lower()
+        sort_param = "&sp=CAI%253D" if any(w in lower_q.split() for w in ("latest", "recent", "new", "newest")) else ""
+        search_url = f"https://www.youtube.com/results?search_query={encoded}{sort_param}"
     elif "bing" in engine_norm:
         search_url = f"https://www.bing.com/search?q={encoded}"
     elif "duck" in engine_norm or "ddg" in engine_norm:
@@ -362,8 +364,10 @@ def open_youtube(query: str = "", video_url: str = "", timestamp: str | int = 0)
     # Search Query
     if query:
         clean_q = query.strip()
+        lower_q = clean_q.lower()
         encoded = urllib.parse.quote_plus(clean_q)
-        search_url = f"https://www.youtube.com/results?search_query={encoded}"
+        sort_param = "&sp=CAI%253D" if any(w in lower_q.split() for w in ("latest", "recent", "new", "newest")) else ""
+        search_url = f"https://www.youtube.com/results?search_query={encoded}{sort_param}"
 
         res = open_url(search_url)
         time_msg = f" (Cue playback at {_format_time(secs)})" if secs > 0 else ""
@@ -397,8 +401,10 @@ def get_top_youtube_video_id(query: str) -> str | None:
         return None
     try:
         clean_q = query.strip()
+        lower_q = clean_q.lower()
         encoded = urllib.parse.quote_plus(clean_q)
-        search_url = f"https://www.youtube.com/results?search_query={encoded}"
+        sort_param = "&sp=CAI%253D" if any(w in lower_q.split() for w in ("latest", "recent", "new", "newest")) else ""
+        search_url = f"https://www.youtube.com/results?search_query={encoded}{sort_param}"
         req = urllib.request.Request(
             search_url,
             headers={
