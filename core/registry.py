@@ -194,6 +194,11 @@ TOOL_CATALOG = {
         "description": "Windows self-healing engine: RAM trimming, hung window recovery, DNS flush, port healing, and temp cache cleanup.",
         "primary_actions": ["auto_heal_system", "trim_all_memory", "trim_process_memory", "detect_hung_windows", "heal_network", "heal_stuck_ports", "heal_temp_cache"],
     },
+    "eyes": {
+        "kit": "visual",
+        "description": "Visual perception, on-screen UI grounding, WinRT OCR, and dialog inspection with privacy shield.",
+        "primary_actions": ["see", "click_element", "type_into", "read_dialog", "read", "get_status"],
+    },
 }
 
 
@@ -250,8 +255,10 @@ def list_all_tools() -> dict:
 
 
 def get_tool_module(tool_name: str):
-    """Dynamically loads and returns a tool module from hands/ or tools/."""
+    """Dynamically loads and returns a tool module from hands/ or eyes/."""
     clean_name = tool_name.strip().lower()
+    if clean_name in ("eyes", "eye"):
+        return importlib.import_module("eyes")
     if clean_name not in TOOL_CATALOG:
         raise ValueError(f"Tool '{clean_name}' is not in the MIO inventory.")
 

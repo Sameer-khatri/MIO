@@ -43,13 +43,17 @@ class TestRegistry(unittest.TestCase):
     def test_all_tools_catalog(self):
         tools_res = list_all_tools()
         self.assertTrue(tools_res["success"])
-        self.assertEqual(tools_res["total_tools"], 26)
-        self.assertEqual(len(TOOL_CATALOG), 26)
+        self.assertEqual(tools_res["total_tools"], 27)
+        self.assertEqual(len(TOOL_CATALOG), 27)
 
     def test_get_tool_module_dynamic_load(self):
         audio_mod = get_tool_module("audio")
         self.assertIsNotNone(audio_mod)
         self.assertTrue(hasattr(audio_mod, "set_volume"))
+
+        eyes_mod = get_tool_module("eyes")
+        self.assertIsNotNone(eyes_mod)
+        self.assertTrue(hasattr(eyes_mod, "see"))
 
         with self.assertRaises(ValueError):
             get_tool_module("nonexistent_tool_123")

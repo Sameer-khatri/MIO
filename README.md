@@ -52,6 +52,13 @@ mio/
 │       ├── aegis.py          # Hardware clinic diagnostics, 0-100 health score, prescriptions & treatments
 │       ├── antivirus.py      # Aegis Shield Antivirus: LOLBin detection, beacon auditing, quarantine vault
 │       └── sentinel.py       # 24/7 autonomous background health & threat monitor daemon
+├── eyes/                     # MIO'S EYES (Visual Perception & On-Screen Grounding)
+│   ├── guard.py              # Mechanical privacy shutter, app blacklists & PII redaction
+│   ├── ocr.py                # Native Windows WinRT offline OCR engine & bounding boxes
+│   ├── ui_tree.py            # Windows native accessibility UI Automation tree inspector
+│   ├── locator.py            # Hybrid UI tree + OCR on-screen element locator
+│   ├── reader.py             # Active dialog prompt, modal alert, & regional screen reader
+│   └── __init__.py           # High-level visual API (see, click_element, type_into, read_dialog)
 │
 ├── core/                     # CORE RUNTIME & DISPATCH
 │   ├── agent.py              # System Agent CLI & Natural Language Router
@@ -59,7 +66,8 @@ mio/
 │   └── app_memory.json       # Learned application aliases & paths
 │
 ├── tests/                    # CENTRALIZED TEST SUITE
-│   ├── test_hands.py         # 135+ automated unit tests for all Hands & natural language routing
+│   ├── test_hands.py         # 133+ automated unit tests for all Hands & natural language routing
+│   ├── test_eyes.py          # 18 privacy shield, shutter, OCR, UI tree & collaboration tests
 │   ├── test_registry.py      # Dynamic tool catalog, schemas & workflow execution tests
 │   └── test_aegis.py         # Clinic diagnostics, scoring algorithms & antivirus tests
 │

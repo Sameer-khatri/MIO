@@ -140,6 +140,11 @@ from hands.connectivity.browser import (
     open_website,
     POPULAR_SITES,
 )
+
+try:
+    import eyes
+except ImportError:
+    eyes = None
 from hands.action.mouse import (
     get_cursor_position,
     move_cursor,
@@ -354,7 +359,55 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
             return True, "No running applications found."
         return True, result.get("message", "Failed to inspect running applications.")
 
-    # 5. Media & Audio Hands
+    # 5. MIO Eyes (Visual Grounding & Element Interaction)
+    if lower_input in ("eye status", "eyes status", "check eyes", "eye security", "eyes"):
+        if not eyes:
+            return True, "MIO Eyes subsystem is not installed or available."
+        status = eyes.get_status()
+        shutter = "LOCKED (Secure)" if status.get("shutter_locked") else "OPEN (Inspecting)"
+        return True, f"👁️ MIO Eyes: Shutter [{shutter}] | Privacy Shield: Active ({status.get('blacklisted_process_count')} protected apps, {status.get('sensitive_keyword_count')} sensitive keywords)"
+
+    if lower_input.startswith("double click ") or lower_input.startswith("double-click "):
+        target = re.sub(r"^(double click|double-click)\s+(?:on\s+)?", "", cleaned, flags=re.I).strip()
+        if eyes and target:
+            res = eyes.click_element(target, double_click=True)
+            if res.get("success"):
+                coords = res.get("coordinates", {})
+                return True, f"👁️ ✋ Located '{target}' via {res.get('method')} and double-clicked at ({coords.get('x')}, {coords.get('y')})."
+            return True, res.get("error", f"Could not find '{target}' on screen.")
+        return True, "MIO Eyes subsystem unavailable."
+
+    if lower_input.startswith("click on ") or lower_input.startswith("click "):
+        target = re.sub(r"^click\s+(?:on\s+)?", "", cleaned, flags=re.I).strip()
+        # Avoid intercepting audio click if any
+        if eyes and target:
+            res = eyes.click_element(target)
+            if res.get("success"):
+                coords = res.get("coordinates", {})
+                return True, f"👁️ ✋ Located '{target}' via {res.get('method')} and clicked at ({coords.get('x')}, {coords.get('y')})."
+            return True, res.get("error", f"Could not find '{target}' on screen.")
+
+    type_into_m = re.match(r"^type\s+['\"]?(.+?)['\"]?\s+(?:into|in)\s+['\"]?(.+?)['\"]?$", cleaned, flags=re.I)
+    if type_into_m and eyes:
+        text_to_type = type_into_m.group(1).strip()
+        field_target = type_into_m.group(2).strip()
+        # Don't intercept if it's youtube type command
+        if not ("youtube" in lower_input and "and play" in lower_input):
+            res = eyes.type_into(field_target, text_to_type)
+            if res.get("success"):
+                return True, f"👁️ ✋ Focused '{field_target}' and typed text successfully."
+            return True, res.get("error", f"Could not find field '{field_target}' on screen.")
+
+    if lower_input in ("read dialog", "read error", "read alert", "what is on the screen", "read screen", "read prompt"):
+        if eyes:
+            res = eyes.read_dialog()
+            if res.get("success"):
+                btns = ", ".join(b["name"] for b in res.get("buttons", [])) or "None"
+                return True, f"👁️ On-Screen Dialog: '{res.get('window_title')}'\nMessage: {res.get('message')}\nAvailable Buttons: [{btns}]"
+            return True, res.get("error", "No active dialog found on screen.")
+        return True, "MIO Eyes subsystem unavailable."
+
+    # 6. Media & Audio Hands
     if lower_input.startswith("speak "):
         txt = cleaned[6:].strip()
         res = speak_text(txt)

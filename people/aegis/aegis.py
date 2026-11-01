@@ -146,6 +146,22 @@ class AegisDoctor:
         return self.sentinel.get_status()
 
     # ---------------------------------------------------------
+    # Visual Perception & Screen Prompt Inspection (via MIO Eyes)
+    # ---------------------------------------------------------
+    def inspect_visual_alert(self, query: str = "") -> Dict[str, Any]:
+        """
+        Uses MIO Eyes to visually inspect an active on-screen dialog, hardware warning,
+        or alert prompt with full privacy shield protections.
+        """
+        try:
+            import eyes
+            if query:
+                return eyes.see(query)
+            return eyes.read_dialog()
+        except Exception as err:
+            return {"success": False, "error": f"MIO Eyes unavailable: {err}"}
+
+    # ---------------------------------------------------------
     # 1. Battery & Power Diagnostics
     # ---------------------------------------------------------
     def diagnose_battery(self) -> Dict[str, Any]:
@@ -741,6 +757,17 @@ class AegisDoctor:
                 cures.append("Type 'survey on' to engage continuous 24/7 background telemetry and automatic RAM pressure relief.")
             else:
                 cures.append("Sentinel is actively guarding battery, memory leaks, and thermal spikes in the background.")
+
+        if any(w in text for w in ["screen", "dialog", "popup", "error message", "alert", "warning dialog", "prompt"]):
+            eye_res = self.inspect_visual_alert()
+            if eye_res.get("success"):
+                title = eye_res.get("window_title", "")
+                msg = eye_res.get("message", "")
+                diagnosis.append(f"Visual Screen Prompt (via MIO Eyes): Dialog '{title}' reads: '{msg}'.")
+                cures.append("Review the dialog prompt or use MIO Eyes click_element to dismiss or confirm safely.")
+            else:
+                diagnosis.append(f"Visual Screen Audit: {eye_res.get('error', 'No alert dialog detected')}.")
+                cures.append("Screen is clear of immediate modal warning dialogs.")
 
         if not diagnosis:
             score = self.calculate_health_score()
