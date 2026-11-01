@@ -250,15 +250,25 @@ def list_all_tools() -> dict:
 
 
 def get_tool_module(tool_name: str):
-    """Dynamically loads and returns a tool module from tools/."""
+    """Dynamically loads and returns a tool module from hands/ or tools/."""
     clean_name = tool_name.strip().lower()
     if clean_name not in TOOL_CATALOG:
         raise ValueError(f"Tool '{clean_name}' is not in the MIO inventory.")
 
-    try:
-        return importlib.import_module(f"agents.system_agent.tools.{clean_name}")
-    except ImportError:
-        return importlib.import_module(f"tools.{clean_name}")
+    kit = TOOL_CATALOG[clean_name]["kit"]
+    for mod_path in [
+        f"hands.{kit}.{clean_name}",
+        f"hands.{clean_name}",
+        f"agents.system_agent.tools.{clean_name}",
+        f"tools.{clean_name}",
+        clean_name,
+    ]:
+        try:
+            return importlib.import_module(mod_path)
+        except ImportError:
+            continue
+
+    raise ImportError(f"Could not load tool module '{clean_name}' from any registered hand kit.")
 
 
 def execute_action(tool_name: str, action_name: str, **kwargs) -> dict:

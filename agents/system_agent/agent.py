@@ -184,6 +184,7 @@ from tools.wifi_tools import (
     scan_wifi_networks,
     connect_to_wifi,
     disconnect_wifi,
+    delete_wifi_profile,
     flush_dns_cache,
 )
 from tools.services import (

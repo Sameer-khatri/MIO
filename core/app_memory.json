@@ -1,0 +1,38 @@
+{
+    "destination": {
+        "name": "destination",
+        "aliases": [],
+        "record_type": "path",
+        "launch_method": "folder",
+        "target": "C:\\Users\\Optim\\AppData\\Local\\Temp\\tmpznp1us91\\destination",
+        "last_verified": "2026-10-31T12:46:04+00:00",
+        "last_updated": "2026-10-31T12:46:04+00:00"
+    },
+    "primex": {
+        "name": "PRIMEX",
+        "aliases": [],
+        "record_type": "path",
+        "launch_method": "folder",
+        "target": "C:\\Users\\Optim\\AppData\\Local\\Temp\\tmpznp1us91\\destination\\PRIMEX",
+        "last_verified": "2026-10-31T12:46:04+00:00",
+        "last_updated": "2026-10-31T12:46:04+00:00"
+    },
+    "notepad": {
+        "name": "notepad",
+        "aliases": [],
+        "record_type": "application",
+        "launch_method": "exe",
+        "target": "notepad.exe",
+        "last_verified": "2026-10-31T12:53:47+00:00",
+        "last_updated": "2026-10-31T12:53:47+00:00"
+    },
+    "calculator": {
+        "name": "calculator",
+        "aliases": [],
+        "record_type": "application",
+        "launch_method": "exe",
+        "target": "calc.exe",
+        "last_verified": "2026-11-01T05:54:41+00:00",
+        "last_updated": "2026-11-01T05:51:09+00:00"
+    }
+}
