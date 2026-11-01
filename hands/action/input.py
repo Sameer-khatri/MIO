@@ -28,6 +28,8 @@ VK_CODES = {
     "c": 0x43,
     "a": 0x41,
     "z": 0x5A,
+    "/": 0xBF,
+    "?": 0xBF,
 }
 
 
@@ -76,6 +78,9 @@ def send_hotkey(keys: list[str]) -> dict:
         "keys": keys,
         "message": f"Sent hotkey combination: {' + '.join(keys).upper()}."
     }
+
+
+press_hotkey = send_hotkey
 
 
 def press_key(key: str) -> dict:
