@@ -21,3 +21,7 @@ src-tauri/gen/
 Thumbs.db
 .idea/
 .vscode/
+
+# Aegis Quarantine Vault
+agents/aegis/.quarantine/
+*.aegis_quarantined
