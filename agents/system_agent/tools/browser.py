@@ -62,6 +62,10 @@ def search_web(query: str, engine: str = "google") -> dict:
         search_url = f"https://www.bing.com/search?q={encoded}"
     elif "duck" in engine_norm or "ddg" in engine_norm:
         search_url = f"https://duckduckgo.com/?q={encoded}"
+    elif "wiki" in engine_norm:
+        search_url = f"https://en.wikipedia.org/wiki/Special:Search?search={encoded}"
+    elif "yahoo" in engine_norm:
+        search_url = f"https://search.yahoo.com/search?p={encoded}"
     else:
         search_url = f"https://www.google.com/search?q={encoded}"
 
@@ -75,6 +79,65 @@ def search_web(query: str, engine: str = "google") -> dict:
             "message": f"Searching {engine_norm.title()} for: '{clean_q}'."
         }
     return res
+
+
+POPULAR_SITES = {
+    "google": "https://www.google.com",
+    "youtube": "https://www.youtube.com",
+    "github": "https://github.com",
+    "reddit": "https://www.reddit.com",
+    "chatgpt": "https://chatgpt.com",
+    "openai": "https://openai.com",
+    "gmail": "https://mail.google.com",
+    "twitter": "https://x.com",
+    "x": "https://x.com",
+    "wikipedia": "https://www.wikipedia.org",
+    "netflix": "https://www.netflix.com",
+    "amazon": "https://www.amazon.com",
+    "linkedin": "https://www.linkedin.com",
+    "facebook": "https://www.facebook.com",
+    "instagram": "https://www.instagram.com",
+    "stackoverflow": "https://stackoverflow.com",
+    "duckduckgo": "https://duckduckgo.com",
+    "bing": "https://www.bing.com",
+    "yahoo": "https://www.yahoo.com",
+    "claude": "https://claude.ai",
+}
+
+
+def open_website(site_or_url: str) -> dict:
+    """
+    Resolves popular website names or URLs and opens them directly in the user's browser.
+    Handles 'github', 'google', 'reddit', 'chatgpt', 'youtube', or full URLs like 'reddit.com'.
+    """
+    if not site_or_url or not isinstance(site_or_url, str):
+        return {"success": False, "message": "Website name or URL required."}
+
+    clean = site_or_url.strip()
+    lower = clean.lower().rstrip("/").replace("in browser", "").replace("website", "").replace("site", "").strip()
+
+    if lower in POPULAR_SITES:
+        target_url = POPULAR_SITES[lower]
+        res = open_url(target_url)
+        res["site"] = lower
+        res["message"] = f"Opened {lower.title()} ({target_url}) in default browser."
+        return res
+
+    # Check for domain extensions (e.g. github.com, news.ycombinator.com)
+    domain_exts = (".com", ".org", ".net", ".io", ".ai", ".co", ".in", ".edu", ".gov", ".app", ".dev", ".xyz", ".me")
+    if any(lower.endswith(ext) or f"{ext}/" in lower for ext in domain_exts):
+        target_url = clean if clean.startswith("http://") or clean.startswith("https://") else f"https://{clean}"
+        res = open_url(target_url)
+        res["site"] = clean
+        res["message"] = f"Opened '{clean}' in default browser."
+        return res
+
+    if clean.startswith("http://") or clean.startswith("https://") or clean.startswith("www."):
+        res = open_url(clean)
+        return res
+
+    # Fallback: Google search for this website
+    return search_web(clean, engine="google")
 
 
 def open_incognito(url: str = "") -> dict:

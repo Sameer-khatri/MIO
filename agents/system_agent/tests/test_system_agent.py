@@ -2799,6 +2799,54 @@ class TestSystemAgent(unittest.TestCase):
                 self.assertTrue(cont)
                 self.assertEqual(msg, "Pressed key 'enter'.")
 
+    def test_web_and_compound_search_dispatch(self):
+        from agent import handle_command
+        with patch("tools.browser.webbrowser.open"):
+            # Compound search: "open google in browser and search for ai news"
+            cont, msg = handle_command("open google in browser and search for ai news")
+            self.assertTrue(cont)
+            self.assertIn("Searching Google for: 'ai news'.", msg)
+
+            # "open google and search for ai news"
+            cont, msg = handle_command("open google and search for ai news")
+            self.assertTrue(cont)
+            self.assertIn("Searching Google for: 'ai news'.", msg)
+
+            # "open browser and search for ai news"
+            cont, msg = handle_command("open browser and search for ai news")
+            self.assertTrue(cont)
+            self.assertIn("Searching Google for: 'ai news'.", msg)
+
+            # "search for ai news on google"
+            cont, msg = handle_command("search for ai news on google")
+            self.assertTrue(cont)
+            self.assertIn("Searching Google for: 'ai news'.", msg)
+
+            # "search ai news on bing"
+            cont, msg = handle_command("search ai news on bing")
+            self.assertTrue(cont)
+            self.assertIn("Searching Bing for: 'ai news'.", msg)
+
+            # "search quantum computing on wikipedia"
+            cont, msg = handle_command("search quantum computing on wikipedia")
+            self.assertTrue(cont)
+            self.assertIn("Searching Wikipedia for: 'quantum computing'.", msg)
+
+            # "google who won the game"
+            cont, msg = handle_command("google who won the game")
+            self.assertTrue(cont)
+            self.assertIn("Searching Google for: 'who won the game'.", msg)
+
+            # "open github in browser"
+            cont, msg = handle_command("open github in browser")
+            self.assertTrue(cont)
+            self.assertIn("Opened Github", msg)
+
+            # "open reddit.com"
+            cont, msg = handle_command("open reddit.com")
+            self.assertTrue(cont)
+            self.assertIn("reddit.com", msg)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -162,7 +162,7 @@ TOOL_CATALOG = {
     "browser": {
         "kit": "connectivity",
         "description": "Open default browser, launch incognito/private windows, route to specific browser, and batch tabs.",
-        "primary_actions": ["open_url", "open_incognito", "open_with_browser", "open_multiple_urls", "get_default_browser", "open_youtube", "search_and_play_youtube", "control_youtube", "open_youtube_and_type"],
+        "primary_actions": ["open_url", "search_web", "open_website", "open_incognito", "open_with_browser", "open_multiple_urls", "get_default_browser", "open_youtube", "search_and_play_youtube", "control_youtube", "open_youtube_and_type"],
     },
     "power": {
         "kit": "connectivity",

@@ -135,6 +135,8 @@ from tools.browser import (
     control_youtube,
     open_youtube_and_type,
     parse_timestamp,
+    open_website,
+    POPULAR_SITES,
 )
 from tools.mouse import (
     get_cursor_position,
@@ -520,6 +522,63 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         target_url = re.sub(r"^(open url|browse)\s+", "", cleaned, flags=re.I).strip()
         res = open_url(target_url)
         return True, res.get("message")
+    if lower_input.startswith("open incognito") or lower_input.startswith("incognito"):
+        target_url = re.sub(r"^(open incognito|incognito)\s*", "", cleaned, flags=re.I).strip()
+        res = open_incognito(target_url)
+        return True, res.get("message")
+
+    # A. "search [for] <query> on/in/using (google|bing|duckduckgo|youtube|yahoo|web)"
+    # Handles: "search for ai news on google", "search ai news on bing"
+    search_on = re.match(
+        r"^search(?:\s+for)?\s+(.+?)\s+(?:on|in|using)\s+(google|bing|duckduckgo|ddg|youtube|yahoo|wiki|wikipedia|web|browser)$",
+        cleaned,
+        flags=re.IGNORECASE
+    )
+    if search_on:
+        query_val = search_on.group(1).strip()
+        engine_val = search_on.group(2).strip().lower()
+        if engine_val in ("web", "browser"):
+            engine_val = "google"
+        elif engine_val in ("wiki", "wikipedia"):
+            engine_val = "wikipedia"
+        res = search_web(query_val, engine=engine_val)
+        return True, res.get("message")
+
+    # B. Compound search: "open (google|bing|browser|chrome|brave|edge) [in browser] [and] (type|search for|search) <query>"
+    # Handles: "open google in browser and search for ai news", "open browser and search for ai news", etc.
+    compound_search = re.match(
+        r"^open\s+(google|bing|duckduckgo|ddg|yahoo|wiki|wikipedia|browser|chrome|brave|edge|firefox)?(?:\s+in\s+browser)?\s*(?:and\s+)?(?:type|search\s+for|search)\s+(.+)$",
+        cleaned,
+        flags=re.IGNORECASE
+    )
+    if compound_search:
+        engine_raw = (compound_search.group(1) or "google").strip().lower()
+        search_query = compound_search.group(2).strip()
+        if engine_raw in ("browser", "chrome", "brave", "edge", "firefox"):
+            engine_name = "google"
+        elif engine_raw in ("wiki", "wikipedia"):
+            engine_name = "wikipedia"
+        else:
+            engine_name = engine_raw or "google"
+        res = search_web(search_query, engine=engine_name)
+        return True, res.get("message")
+
+    # C. "google <query>"
+    # Handles: "google ai news", "google who won the game"
+    if lower_input.startswith("google "):
+        q = cleaned[7:].strip()
+        res = search_web(q, engine="google")
+        return True, res.get("message")
+
+    # D. "open <site> in browser" or "browse <site>"
+    # Handles: "open google in browser", "open reddit in browser", "open github in browser"
+    open_in_browser = re.match(r"^(?:open|browse)\s+(.+?)\s+in\s+browser$", cleaned, flags=re.IGNORECASE)
+    if open_in_browser:
+        target_site = open_in_browser.group(1).strip()
+        res = open_website(target_site)
+        return True, res.get("message")
+
+    # E. Specific engine prefixes
     if lower_input.startswith("search youtube for "):
         q = cleaned[19:].strip()
         res = search_web(q, engine="youtube")
@@ -535,10 +594,6 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
     if lower_input.startswith("search for ") or lower_input.startswith("search "):
         q = re.sub(r"^(search for|search)\s+", "", cleaned, flags=re.I).strip()
         res = search_web(q, engine="google")
-        return True, res.get("message")
-    if lower_input.startswith("open incognito") or lower_input.startswith("incognito"):
-        target_url = re.sub(r"^(open incognito|incognito)\s*", "", cleaned, flags=re.I).strip()
-        res = open_incognito(target_url)
         return True, res.get("message")
 
     # 11.5 YouTube Hands (Search, Cue Playback & Controls)
@@ -1173,6 +1228,32 @@ def handle_command(user_input: str) -> tuple[bool, str | None]:
         raw_target = cleaned[5:].strip()
         if not raw_target:
             return True, "Please specify an application to open. Example: 'open calculator'"
+
+        # Check if the target is actually a website, web portal, or compound web task
+        lower_target = raw_target.lower()
+        domain_exts = (".com", ".org", ".net", ".io", ".ai", ".co", ".in", ".edu", ".gov", ".app", ".dev", ".xyz", ".me")
+        is_web_target = (
+            " in browser" in lower_target
+            or " and search" in lower_target
+            or lower_target.startswith("http://")
+            or lower_target.startswith("https://")
+            or lower_target.startswith("www.")
+            or any(lower_target.endswith(ext) or f"{ext}/" in lower_target for ext in domain_exts)
+            or lower_target in POPULAR_SITES
+        )
+
+        if is_web_target:
+            # Check for embedded search: "open google and search for ai news"
+            search_m = re.search(r"^(.*?)(?:\s+in\s+browser)?\s+and\s+search(?:\s+for)?\s+(.+)$", raw_target, flags=re.I)
+            if search_m:
+                eng = search_m.group(1).strip().lower()
+                sq = search_m.group(2).strip()
+                eng_name = eng if eng in ("google", "bing", "duckduckgo", "youtube", "yahoo") else "google"
+                res = search_web(sq, engine=eng_name)
+                return True, res.get("message")
+
+            res = open_website(raw_target)
+            return True, res.get("message")
 
         result = open_application(raw_target)
         if result.get("success"):
