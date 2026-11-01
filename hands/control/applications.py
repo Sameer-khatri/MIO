@@ -10,7 +10,8 @@ try:
 except ImportError:
     winreg = None
 
-MEMORY_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app_memory.json")
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+MEMORY_FILE = os.path.join(_REPO_ROOT, "core", "app_memory.json")
 
 BUILTIN_APPS = {
     "calculator": {"name": "calculator", "launch_method": "exe", "target": "calc.exe"},

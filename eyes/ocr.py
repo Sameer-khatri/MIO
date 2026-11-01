@@ -9,6 +9,8 @@ import json
 import os
 import subprocess
 import tempfile
+import time
+import uuid
 from typing import Optional
 
 from eyes.guard import SafeEyeShutter, redact_sensitive_text
@@ -136,7 +138,7 @@ def capture_and_recognize_region(x: int, y: int, width: int, height: int, window
     and immediately deletes the image buffer. Coordinates returned are relative to the entire desktop screen.
     """
     with SafeEyeShutter(target_title=window_title, target_proc=process_name):
-        temp_img = os.path.join(tempfile.gettempdir(), f"mio_eye_frame_{os.getpid()}_{int(tempfile._get_candidate_names().__next__(), 36)}.png")
+        temp_img = os.path.join(tempfile.gettempdir(), f"mio_eye_{uuid.uuid4().hex}.png")
         
         # Take regional capture using System.Drawing
         ps_capture = f"""

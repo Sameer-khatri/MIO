@@ -186,7 +186,7 @@ class TestEyesHighLevel(unittest.TestCase):
         self.assertTrue(res["success"])
         mock_move.assert_called_once_with(120, 180)
         mock_click.assert_called_once_with(button="left")
-        mock_type.assert_called_once_with(text="believer song", press_enter=False)
+        mock_type.assert_called_once_with(text="believer song")
 
 
 class TestDoctorAndAgentIntegration(unittest.TestCase):

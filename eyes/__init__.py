@@ -81,7 +81,10 @@ def type_into(query: str, text: str, target_window: str = "", press_enter: bool 
     time.sleep(0.1)
 
     # 2. Type text via Action Hand
-    type_res = type_text(text=text, press_enter=press_enter)
+    type_res = type_text(text=text)
+    if press_enter:
+        from hands.action.input import send_hotkey
+        send_hotkey(["enter"])
 
     return {
         "success": type_res.get("success", False),
